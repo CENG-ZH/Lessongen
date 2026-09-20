@@ -1,4 +1,4 @@
-"""Build the concise Paper4 and Web architecture brief from the retained v1 DOCX."""
+"""Build a standalone Lessongen architecture brief and its diagrams."""
 
 from __future__ import annotations
 
@@ -15,8 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 WEB_ROOT = Path(__file__).resolve().parents[1]
 PY_ROOT = WEB_ROOT.parent / "paper4_pipeline"
-SOURCE = PY_ROOT / "docs" / "COMALESSON_Paper4_架构实现与导师规划对照说明_v1.0.docx"
-OUTPUT = WEB_ROOT / "docs" / "COMALESSON_Paper4_核心架构与Web实现_2026-09-16_v3.docx"
+OUTPUT = WEB_ROOT / "docs" / "Lessongen_核心架构与Web实现.docx"
 IMAGES = WEB_ROOT / "docs" / "ui-audit"
 DIAGRAM = WEB_ROOT / "docs" / "ui-audit" / "architecture-current.png"
 AGENT_DIAGRAM = WEB_ROOT / "docs" / "ui-audit" / "agent-routing-current.png"
@@ -279,15 +278,9 @@ def add_shot(doc, title: str, filename: str, *, width: float = 5.65, start_new_p
 
 
 def main() -> None:
-    if not SOURCE.is_file():
-        raise FileNotFoundError(SOURCE)
     draw_architecture()
     draw_agent_architecture()
-    doc = Document(SOURCE)
-    body = doc._element.body
-    for child in list(body):
-        if child.tag != qn("w:sectPr"):
-            body.remove(child)
+    doc = Document()
 
     sec = doc.sections[0]
     sec.page_width = Inches(8.5)
@@ -391,7 +384,7 @@ def main() -> None:
     )
     add_p(
         doc,
-        "目前本机运行数据统一放在 F:\\comalesson\\runtime\\lesoongen；C 盘仍保留项目代码。Web 的上传、任务状态和下载依赖本机服务运行，尚未进行多用户部署。",
+        "运行数据目录由环境变量配置；Web 的上传、任务状态和下载依赖本机服务运行，当前版本尚未进行多用户生产部署。",
     )
 
     doc.add_heading("系统总体架构", level=1)

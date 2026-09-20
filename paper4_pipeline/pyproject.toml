@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "comalesson-paper4"
+name = "lessongen-paper4"
 version = "0.1.0"
 description = "Traceable multi-agent lesson-plan generation and revision pipeline"
 readme = "README.md"

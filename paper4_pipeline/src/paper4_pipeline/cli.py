@@ -37,7 +37,7 @@ DEFAULT_OUTPUT = Path(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="COMALESSON Paper#4 真实多智能体教案生成器"
+        description="Lessongen Paper#4 真实多智能体教案生成器"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

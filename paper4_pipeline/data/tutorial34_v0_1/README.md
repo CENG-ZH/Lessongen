@@ -13,9 +13,9 @@
 
 在仓库根目录运行：
 
-```powershell
-F:\Anaconda\envs\coma_lesson\python.exe tutorials\common\validate_dataset.py `
-  --root data\tutorial34_v0_1
+```bat
+cd /d <仓库目录>\paper4_pipeline
+python tutorials\common\validate_dataset.py --root data\tutorial34_v0_1
 ```
 
 ## 边界

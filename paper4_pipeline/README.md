@@ -1,6 +1,6 @@
-# COMALESSON Paper#4：真实多智能体教案闭环
+# Lessongen Paper#4：真实多智能体教案闭环
 
-本目录是从原 COMALESSON 中重新划定边界的 Paper#4 实现。所有模型角色均通过 DeepSeek OpenAI-compatible API 调用 `deepseek-v4-flash`；没有离线 Mock 或伪造成功回退。密钥、网络或不可恢复节点错误会明确标记为 `failed`。若只有 Rewriter 在重试后无法满足输出契约、且此前已有通过硬规则的安全版本，系统不会谎称修改成功，也不会抛弃整份教案，而是将意见记为未解决并以 `needs_human` 交付安全版本。
+本目录是 Lessongen 的 Paper#4 多智能体教案引擎。所有模型角色均通过 DeepSeek OpenAI-compatible API 调用 `deepseek-v4-flash`；没有离线 Mock 或伪造成功回退。密钥、网络或不可恢复节点错误会明确标记为 `failed`。若只有 Rewriter 在重试后无法满足输出契约、且此前已有通过硬规则的安全版本，系统不会谎称修改成功，也不会抛弃整份教案，而是将意见记为未解决并以 `needs_human` 交付安全版本。
 
 第一次运行请直接阅读 `docs/RUN_GUIDE.md`；为什么新增设计节点、内容字段和黑白灰 Word 版式，见 `docs/QUALITY_UPGRADE_V1_2.md`。v1.3 拆分步骤中的 `resource_ids` 与 `artifact_ids`；v1.4 新增 Alignment Critic；v1.5 修正延期意见回放；当前 v1.6 增加输入证据画像、校准工程质量门、第三轮迭代、改写失败安全降级和离线分析工具。
 
@@ -24,7 +24,7 @@ LessonTask
 
 模型负责生成和语义判断；程序负责身份、Schema、引用完整性、步骤时长、批评生命周期、预算、路由、版本选择和导出。Judge 的建议不是控制流，内部评分也不能替代教师/专家实验。
 
-项目内 `data/tutorial34_v0_1/` 保存旧 Tutorial3/4 的开发集与适配测试材料，因此迁移后不依赖原 COMALESSON 父目录的数据文件。
+项目内 `data/tutorial34_v0_1/` 保存 Tutorial3/4 的开发集与适配测试材料，运行和测试不依赖仓库外的数据文件。
 
 ## 角色和异质性
 
