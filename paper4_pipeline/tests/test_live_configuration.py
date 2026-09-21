@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import json
+import os
 import unittest
+from unittest.mock import Mock, patch
 
+import httpx
 from langchain_core.messages import AIMessage
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
-from support import make_config, make_document, make_task
+from support import make_config, make_critique, make_document, make_task, make_version
 
 from paper4_pipeline.agents.live import (
     CritiqueProposal,
     CritiqueProposalSet,
+    ValidationProposalSet,
     _validate_critic_batch,
     build_live_suite,
 )
@@ -18,7 +24,7 @@ from paper4_pipeline.control.alignment import build_alignment_audit
 from paper4_pipeline.control.evidence import build_task_evidence_profile
 from paper4_pipeline.control.rules import lesson_target_changed
 from paper4_pipeline.knowledge.registry import build_knowledge_bundle
-from paper4_pipeline.domain.models import ModelConfig, RubricDimension
+from paper4_pipeline.domain.models import CritiqueBatch, ModelConfig, RubricDimension
 from paper4_pipeline.providers.openai_compatible import (
     OpenAICompatibleProvider,
     ProviderInvocationError,
@@ -82,6 +88,76 @@ class _LengthLimitedClient:
 
 
 class LiveConfigurationTests(unittest.TestCase):
+    def test_validator_retry_identifies_invalid_merge_and_valid_targets(self) -> None:
+        suite = build_live_suite(make_config())
+        version = make_version("v0", 0, score=7.0)
+        critiques = CritiqueBatch(
+            batch_id="batch-test", plan_version_id=version.version_id, round_index=1,
+            items=[make_critique(key) for key in ("source", "rejected", "accepted")],
+        )
+        proposals = ValidationProposalSet.model_validate({"decisions": [
+            {"critique_id": key, "decision": decision, "grounded": True,
+             "relevant": True, "actionable": True, "reason": "fixture",
+             "canonical_critique_id": "rejected" if key == "source" else ""}
+            for key, decision in (("source", "merge"), ("rejected", "reject"),
+                                  ("accepted", "accept"))
+        ]})
+        provider = Mock()
+        provider.invoke_structured.side_effect = (
+            lambda **kwargs: kwargs["result_validator"](proposals)
+        )
+        suite.validator.provider = provider
+        with self.assertRaises(ValueError) as caught:
+            suite.validator.validate(make_task(), version, critiques, 1)
+        message = str(caught.exception)
+        self.assertIn("critique 'source'", message)
+        self.assertIn("target 'rejected' has decision 'reject'", message)
+        self.assertIn("Current accepted target IDs: ['accepted']", message)
+        self.assertIn("clear canonical_critique_id", message)
+        self.assertEqual("reject", proposals.decisions[1].decision.value)
+
+    def test_deepseek_request_preserves_output_limit_and_thinking_mode(self) -> None:
+        for override in (None, 2048):
+            with self.subTest(max_output_tokens=override):
+                requests: list[dict[str, object]] = []
+
+                def respond(request: httpx.Request) -> httpx.Response:
+                    requests.append(json.loads(request.content))
+                    return httpx.Response(200, json={
+                        "id": "unit-response",
+                        "object": "chat.completion",
+                        "created": 1,
+                        "model": "deepseek-v4-flash",
+                        "choices": [{"index": 0, "finish_reason": "stop",
+                                     "message": {"role": "assistant", "content": '{"value": 1}'}}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                    })
+
+                with (
+                    httpx.Client(transport=httpx.MockTransport(respond), trust_env=False) as transport,
+                    patch.dict(os.environ, {
+                        "DEEPSEEK_API_KEY": "unit-test-key",
+                        "DEEPSEEK_BASE_URL": "https://deepseek.example",
+                    }, clear=True),
+                    patch.object(OpenAICompatibleProvider, "load_environment"),
+                    patch("paper4_pipeline.providers.openai_compatible.ChatOpenAI",
+                          side_effect=lambda **kwargs: ChatOpenAI(**kwargs, http_client=transport)),
+                ):
+                    provider = OpenAICompatibleProvider(ModelConfig(max_tokens=12288))
+                    result = provider.invoke_structured(
+                        prompt=load_prompt("writer_prompt"),
+                        input_payload={"fixture": True},
+                        output_schema=_RetryPayload,
+                        stage="unit_output_limit",
+                        max_output_tokens=override,
+                    )
+
+                self.assertEqual(1, result.value.value)
+                self.assertEqual(1, len(requests))
+                self.assertEqual(override or 12288, requests[0].get("max_tokens"))
+                self.assertNotIn("max_completion_tokens", requests[0])
+                self.assertEqual({"type": "disabled"}, requests[0]["thinking"])
+
     def test_every_model_backed_role_is_real_deepseek_v4_flash(self) -> None:
         config = make_config()
         suite = build_live_suite(config)

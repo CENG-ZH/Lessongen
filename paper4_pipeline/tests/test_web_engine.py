@@ -48,6 +48,7 @@ from paper4_pipeline.domain.models import (  # noqa: E402
     PipelineResult,
     RunStatus,
     StopReason,
+    TaskMode,
     TokenUsage,
 )
 from paper4_pipeline.providers.openai_compatible import (  # noqa: E402
@@ -55,7 +56,8 @@ from paper4_pipeline.providers.openai_compatible import (  # noqa: E402
     ProviderInvocationError,
 )
 from paper4_pipeline.exporters.common import sha256_file  # noqa: E402
-from support import make_config, make_document, make_task  # noqa: E402
+from paper4_pipeline.exporters.manifest import export_artifacts  # noqa: E402
+from support import make_config, make_document, make_task, make_version  # noqa: E402
 
 
 JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -739,6 +741,41 @@ class EngineApiContractTests(unittest.TestCase):
         self.assertEqual(response.json()["engine_run_id"], repeated.json()["engine_run_id"])
         self.assertEqual(1, len(self.executor.calls))
 
+    def test_failed_optimization_fallback_artifacts_are_downloadable(self) -> None:
+        settings = make_settings(self.root)
+        registry = RunRegistry(settings)
+        run_id = "failed-optimization"
+        registry.create(RunRecord(
+            engine_run_id=run_id,
+            external_job_id=JOB_ID,
+            request_sha256=REQUEST_HASH,
+            mode=EngineMode.OPTIMIZE,
+            task_id="test-lesson",
+            subject="数学",
+            grade="八年级",
+            topic="勾股定理",
+            status=EngineRunStatus.FAILED,
+        ))
+        directory = settings.artifacts_root / run_id
+        directory.mkdir(parents=True)
+        for filename in (
+            "recovery_lesson_plan.json", "recovery_lesson_plan.md",
+            "optimization_report.json", "optimization_report.md",
+        ):
+            (directory / filename).write_text("{}", encoding="utf-8")
+        headers = {"X-Engine-Token": "test-token"}
+        base = f"/internal/v1/runs/{run_id}/artifacts"
+        listing = self.client.get(base, headers=headers)
+        self.assertEqual(200, listing.status_code)
+        self.assertEqual(4, len(listing.json()))
+        for artifact in listing.json():
+            with self.subTest(artifact_id=artifact["artifact_id"]):
+                response = self.client.get(
+                    f"{base}/{artifact['artifact_id']}", headers=headers
+                )
+                self.assertEqual(200, response.status_code, response.text)
+                self.assertEqual(b"{}", response.content)
+
     def test_optimize_streams_original_file_into_run_directory(self) -> None:
         document = Document()
         document.add_paragraph("教学目标：理解一次函数")
@@ -762,6 +799,31 @@ class EngineApiContractTests(unittest.TestCase):
         saved = self.root / "state" / "runs" / run_id / "input" / "original.docx"
         self.assertTrue(saved.is_file())
         self.assertEqual(1, len(self.executor.calls))
+
+    def test_optimization_report_manifest_hash_is_still_checked(self) -> None:
+        settings = make_settings(self.root)
+        registry = RunRegistry(settings)
+        run_id = "completed-optimization"
+        task = make_task()
+        registry.create(RunRecord(
+            engine_run_id=run_id, external_job_id=JOB_ID,
+            request_sha256=REQUEST_HASH, mode=EngineMode.OPTIMIZE,
+            task_id=task.task_id, subject=task.subject, grade=task.grade,
+            topic=task.topic, status=EngineRunStatus.COMPLETED,
+        ))
+        result = PipelineResult(
+            run_id=run_id, task_id=task.task_id, task_mode=TaskMode.OPTIMIZE,
+            experiment_id="unit", method_id="unit", status=RunStatus.COMPLETED,
+            stop_reason=StopReason.QUALITY_PASSED, best_version_id="v0",
+            last_version_id="v0", versions=[make_version("v0", 0, score=8.0)],
+        )
+        directory = settings.artifacts_root / run_id
+        export_artifacts(result, directory, include_docx=False)
+        projection = EngineProjection(settings)
+        report = projection.artifact_path(run_id, "optimization-report-json")
+        report.write_text("{}", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "artifact hash mismatch"):
+            projection.artifact_path(run_id, "optimization-report-json")
 
 
 if __name__ == "__main__":

@@ -411,7 +411,20 @@ class LiveValidator:
                 if item.decision == ValidationDecisionKind.MERGE:
                     target = by_id.get(item.canonical_critique_id)
                     if target is None or target.decision != ValidationDecisionKind.ACCEPT:
-                        raise ValueError("merge target must be accepted in the same batch")
+                        accepted_ids = sorted(
+                            key for key, value in by_id.items()
+                            if value.decision == ValidationDecisionKind.ACCEPT
+                        )
+                        target_decision = target.decision.value if target else "missing"
+                        raise ValueError(
+                            f"Invalid merge for critique {item.critique_id!r}: target "
+                            f"{item.canonical_critique_id!r} has decision {target_decision!r}. "
+                            "The merge target must be accepted in the same batch. "
+                            f"Current accepted target IDs: {accepted_ids}. "
+                            "Choose a matching accepted target, or give this critique its "
+                            "own accept/reject/defer decision and clear canonical_critique_id. "
+                            "Do not accept a target merely to satisfy the merge constraint."
+                        )
 
         response = self.provider.invoke_structured(
             prompt=self.prompt,
