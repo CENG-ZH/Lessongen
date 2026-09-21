@@ -209,9 +209,11 @@ class EngineProjection:
             / "recovery_lesson_plan.json",
             "recovery-plan-markdown": self._artifact_dir(engine_run_id)
             / "recovery_lesson_plan.md",
+            "optimization-report-json": self._artifact_dir(engine_run_id)
+            / "optimization_report.json",
+            "optimization-report-markdown": self._artifact_dir(engine_run_id)
+            / "optimization_report.md",
         }
-        if artifact_id in special:
-            return special[artifact_id].resolve()
         result = self._pipeline_result(engine_run_id)
         if result and result.artifacts:
             for item in result.artifacts.artifacts:
@@ -225,6 +227,8 @@ class EngineProjection:
                     if item.status == "ok" and sha256_file(candidate) != item.sha256:
                         raise RuntimeError("artifact hash mismatch")
                     return candidate
+        if artifact_id in special:
+            return special[artifact_id].resolve()
         raise KeyError(artifact_id)
 
     def _events(self, engine_run_id: str) -> list[PublicEngineEvent]:

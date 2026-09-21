@@ -169,9 +169,12 @@ class OpenAICompatibleProvider:
             "timeout": self.settings.timeout_seconds,
             # Retries are owned here so attempts and parse failures are auditable.
             "max_retries": 0,
-            "max_tokens": self.settings.max_tokens,
             "extra_body": {
                 "thinking": {"type": self.settings.thinking_mode},
+                # ChatOpenAI renames its max_tokens argument to OpenAI's
+                # max_completion_tokens. DeepSeek expects max_tokens instead;
+                # send it unchanged or the service silently uses its 8K default.
+                "max_tokens": self.settings.max_tokens,
             },
         }
         if self.settings.thinking_mode == "disabled":
@@ -233,7 +236,10 @@ class OpenAICompatibleProvider:
                     "response_format": {"type": "json_object"},
                 }
                 if max_output_tokens is not None:
-                    bind_options["max_tokens"] = max_output_tokens
+                    bind_options["extra_body"] = {
+                        "thinking": {"type": self.settings.thinking_mode},
+                        "max_tokens": max_output_tokens,
+                    }
                 message = client.bind(**bind_options).invoke(messages)
                 usage = _usage_from_message(message)
                 total_usage = TokenUsage(
