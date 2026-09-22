@@ -53,3 +53,13 @@ npm test
 - F 引擎 `--check` 确认 Provider、解释器、配置与数据根均来自 F；不打印 Key/Token。Java 本机 24 项通过、MySQL Testcontainers 1 项因 Docker daemon 未运行而跳过；前端 6 项单测、7 项浏览器 E2E、类型/格式/Lint/OpenAPI/构建通过。根 Compose 语法检查通过，但镜像构建、MySQL 迁移和全栈启动尚未实际验收。
 - `.github/workflows/ci.yml` 已配置 Python、Java+Testcontainers、Vue+E2E、Docker build 和 secret scan；尚未推送到 GitHub，因此不能称 CI 已绿。一次 `Get-NetTCPConnection` 查询误报空端口；随后用 `netstat` 与实际绑定探针交叉核对，发现 5173 的 Node、8080 的 Java、8001 的 Python 正在监听，进程命令行来源因当前权限无法核实。根启动脚本现会在首次启动前用真实绑定探针拒绝 5173/8080 端口冲突，并报告可见 PID；不擅自停止用户进程。
 - Docker 路线使用新的 MySQL 卷和仓库 `runtime/`，与旧 C/F 历史数据隔离。旧任务的读取/迁移、Java 构建来源指纹和真正 Docker 全栈验收仍留在 Gate 0A/0B，不能因为离线测试通过就勾选完成。
+
+## 6. P01 验收执行记录（2026-09-22，提交后）
+
+本机完成 P01（Phase 0B）代码级修复与验证，随后按模块提交；`tasks.md` 未勾选，原因见下。
+
+- 修复阻断项：原 `paper4_pipeline/uv.lock` 与 `pyproject.toml` 不一致（`uv sync --locked --extra web --extra dev` 与 `uv lock --check` 均失败，CI Python job 第一步必红）。重新执行 `uv lock` 后 64 包锁定一致，`uv lock --check` 通过，`uv sync --locked` 干净安装成功。解析结果把 openai 3.17.0→3.16.2、langchain-openai 1.6.3→1.6.2 等 7 个包回退到 lock 版本；在该版本组合下全量测试通过。
+- 验证结果（CI 同款命令，本机实测）：Python `uv run --no-sync python -m pytest -q` = **174 passed**；源码来源断言（`/paper4_pipeline/src/` 路径语义，Windows 下为反斜杠分隔）实际导入 `F:\comalesson\Lessongen\paper4_pipeline\src\paper4_pipeline\__init__.py`；Java `.\mvnw.cmd -B -ntp test` = **29 tests, 0 failures, 1 skipped**（跳过项为需 Docker 的 MySQL 迁移测试，CI ubuntu 会真实执行）；前端 vitest、typecheck、ESLint、Prettier、OpenAPI lint、build 与 Playwright msedge E2E（**7/7**）全部通过；根 `compose.yaml` 语法校验通过。
+- 提交序列（本地 main，未推送）：`5d8d999` fix（引擎产物下载加固、合并意见错误上下文、Prettier）；`4183324` build（Compose/Dockerfile/CI/脚本/uv.lock/启动诊断/文档）；`5299e71` docs（002 规格）。提交前敏感扫描：无真实 Key/Token/PEM 模式（命中的 `DEEPSEEK_API_KEY=你的真实密钥` 均为占位符）。
+- 仍留待确认：`paper4_pipeline/configs/deepseek_v4_flash.json` 的 writer/rewriter `max_tokens` 12288→24576 改动未提交（属问题 1 延续，未经验证，是否保留需项目负责人决定）。
+- 未勾选 `tasks.md` 的原因：T006 依赖 Gate 0A（T001–T005 尚未验收）；Docker 镜像构建、全栈启动、GitHub Actions 平台运行与 gitleaks 扫描需要 Docker 引擎和 GitHub 远端，本机未执行；MySQL 迁移测试的真实执行只能在 CI ubuntu 完成。以上属平台级验证，非代码缺陷。
