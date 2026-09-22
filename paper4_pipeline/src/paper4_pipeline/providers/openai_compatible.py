@@ -171,9 +171,12 @@ class OpenAICompatibleProvider:
             "max_retries": 0,
             "extra_body": {
                 "thinking": {"type": self.settings.thinking_mode},
-                # ChatOpenAI renames its max_tokens argument to OpenAI's
-                # max_completion_tokens. DeepSeek expects max_tokens instead;
-                # send it unchanged or the service silently uses its 8K default.
+                # langchain-openai 1.x sends this extra_body verbatim to
+                # completions.parse(), and the openai SDK unfolds it into the
+                # top-level HTTP body, so DeepSeek receives max_tokens=... as
+                # requested. Do NOT pass max_tokens as a ChatOpenAI constructor
+                # argument: that path is renamed to max_completion_tokens and
+                # DeepSeek ignores it (silent 8K default).
                 "max_tokens": self.settings.max_tokens,
             },
         }

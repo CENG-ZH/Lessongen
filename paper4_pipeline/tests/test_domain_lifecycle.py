@@ -151,6 +151,71 @@ class ValidatorAndRewriterBoundaryTests(unittest.TestCase):
             [item.status for item in validated.items],
         )
 
+    @staticmethod
+    def _merge_decision(critique_id: str, canonical: str) -> ValidationDecision:
+        return ValidationDecision(
+            decision_id=f"decision-{critique_id}",
+            critique_id=critique_id,
+            decision=ValidationDecisionKind.MERGE,
+            grounded=True,
+            relevant=True,
+            actionable=True,
+            reason="重复意见合并",
+            canonical_critique_id=canonical,
+        )
+
+    def test_merge_into_unknown_target_names_both_critique_ids(self) -> None:
+        merged = make_critique("c-merged")
+        batch = CritiqueBatch(
+            batch_id="critique-batch-merge-unknown",
+            plan_version_id="v0",
+            round_index=1,
+            items=[self.first, self.second, merged],
+        )
+        validation = ValidationBatch(
+            batch_id="validation-1",
+            critique_batch_id=batch.batch_id,
+            round_index=1,
+            decisions=[
+                self._decision("c-accepted", ValidationDecisionKind.ACCEPT),
+                self._decision("c-rejected", ValidationDecisionKind.REJECT),
+                self._merge_decision("c-merged", "c-does-not-exist"),
+            ],
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"critique 'c-merged' targets 'c-does-not-exist' for merge.*"
+            r"Available IDs: \['c-accepted', 'c-merged', 'c-rejected'\]",
+        ):
+            apply_validation(batch, validation)
+
+    def test_merge_into_rejected_target_names_both_critique_ids(self) -> None:
+        merged = make_critique("c-merged")
+        batch = CritiqueBatch(
+            batch_id="critique-batch-merge-rejected",
+            plan_version_id="v0",
+            round_index=1,
+            items=[self.first, self.second, merged],
+        )
+        validation = ValidationBatch(
+            batch_id="validation-1",
+            critique_batch_id=batch.batch_id,
+            round_index=1,
+            decisions=[
+                self._decision("c-accepted", ValidationDecisionKind.ACCEPT),
+                self._decision("c-rejected", ValidationDecisionKind.REJECT),
+                self._merge_decision("c-merged", "c-rejected"),
+            ],
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"critique 'c-merged' targets 'c-rejected' for merge.*"
+            r"is 'reject'.*Current accepted IDs: \['c-accepted'\]",
+        ):
+            apply_validation(batch, validation)
+
     def test_missing_curriculum_source_cannot_be_accepted_for_rewrite(self) -> None:
         task = make_task().model_copy(update={"curriculum_standards": []})
         impossible = make_critique("c-no-standard").model_copy(

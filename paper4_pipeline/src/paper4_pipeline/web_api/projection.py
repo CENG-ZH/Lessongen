@@ -159,6 +159,11 @@ class EngineProjection:
         if result and result.artifacts:
             for item in result.artifacts.artifacts:
                 path = Path(item.path)
+                if item.status == "ok" and not path.is_file():
+                    # A listed artifact whose file is gone must not be advertised
+                    # for download: Java would fetch it and treat the 404 as a
+                    # transient sync failure, leaving the job stuck in "running".
+                    continue
                 items.append(
                     EngineArtifact(
                         artifact_id=item.artifact_id,

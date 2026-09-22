@@ -100,6 +100,36 @@ class EngineClientMockTransportTest {
         harness.server.verify();
     }
 
+    @Test
+    void download404BecomesTerminalAppExceptionInsteadOfTransientSyncFailure() {
+        Harness harness = harness();
+        harness.server.expect(once(), requestTo(
+                        "http://engine.test/internal/v1/runs/run-001/artifacts/recovery-plan-json"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND)
+                        .contentType(MediaType.APPLICATION_PROBLEM_JSON));
+
+        AppException error = assertThrows(AppException.class,
+                () -> harness.client.download("run-001", "recovery-plan-json"));
+
+        assertEquals("ENGINE_ARTIFACT_NOT_FOUND", error.code());
+        harness.server.verify();
+    }
+
+    @Test
+    void download504KeepsRetryingThenSurfacesTransientFailure() {
+        Harness harness = harness();
+        harness.server.expect(times(3), requestTo(
+                        "http://engine.test/internal/v1/runs/run-001/artifacts/best-plan-docx"))
+                .andRespond(withStatus(HttpStatus.BAD_GATEWAY)
+                        .contentType(MediaType.APPLICATION_PROBLEM_JSON));
+
+        AppException error = assertThrows(AppException.class,
+                () -> harness.client.download("run-001", "best-plan-docx"));
+
+        assertEquals("ENGINE_UNAVAILABLE", error.code());
+        harness.server.verify();
+    }
+
     private static Harness harness() {
         RestClient.Builder builder = RestClient.builder()
                 .baseUrl("http://engine.test")

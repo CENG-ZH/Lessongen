@@ -75,6 +75,14 @@ def create_app(
     async def missing(_: Request, exc: KeyError) -> JSONResponse:
         return _problem(404, "ENGINE_RUN_NOT_FOUND", f"未找到引擎资源：{exc.args[0]}")
 
+    @app.exception_handler(FileNotFoundError)
+    async def artifact_file_missing(_: Request, exc: FileNotFoundError) -> JSONResponse:
+        return _problem(
+            404,
+            "ENGINE_ARTIFACT_NOT_FOUND",
+            f"引擎产物文件缺失：{Path(exc.filename).name if exc.filename else ''}",
+        )
+
     @app.exception_handler(ValidationError)
     async def invalid_model(_: Request, exc: ValidationError) -> JSONResponse:
         return _problem(422, "ENGINE_INVALID_REQUEST", "内部请求不符合引擎契约")
@@ -209,12 +217,28 @@ def create_app(
         dependencies=auth,
     )
     def download_artifact(engine_run_id: str, artifact_id: str) -> FileResponse:
-        path = projection.artifact_path(engine_run_id, artifact_id)
+        try:
+            path = projection.artifact_path(engine_run_id, artifact_id)
+        except KeyError as exc:
+            # A missing run surfaces KeyError(run_id) from the registry lookup;
+            # a missing artifact surfaces KeyError(artifact_id). Only the latter
+            # is "artifact not found" -- the former must keep its run semantics
+            # so Java treats it as a missing run, not as an artifact gap.
+            if exc.args and exc.args[0] == artifact_id:
+                raise HTTPException(
+                    status_code=404, detail="ENGINE_ARTIFACT_NOT_FOUND"
+                ) from exc
+            raise
         metadata = next(
-            item
-            for item in projection.artifacts(engine_run_id)
-            if item.artifact_id == artifact_id
+            (
+                item
+                for item in projection.artifacts(engine_run_id)
+                if item.artifact_id == artifact_id
+            ),
+            None,
         )
+        if metadata is None:
+            raise HTTPException(status_code=404, detail="ENGINE_ARTIFACT_NOT_FOUND")
         return FileResponse(
             path,
             media_type=metadata.media_type,

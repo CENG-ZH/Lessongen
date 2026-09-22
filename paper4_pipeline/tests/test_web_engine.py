@@ -776,6 +776,63 @@ class EngineApiContractTests(unittest.TestCase):
                 self.assertEqual(200, response.status_code, response.text)
                 self.assertEqual(b"{}", response.content)
 
+    def test_listing_skips_advertised_artifact_whose_file_is_gone(self) -> None:
+        settings = make_settings(self.root)
+        registry = RunRegistry(settings)
+        run_id = "missing-file-run"
+        task = make_task()
+        registry.create(RunRecord(
+            engine_run_id=run_id,
+            external_job_id=JOB_ID,
+            request_sha256=REQUEST_HASH,
+            mode=EngineMode.GENERATE,
+            task_id=task.task_id,
+            subject=task.subject,
+            grade=task.grade,
+            topic=task.topic,
+            status=EngineRunStatus.COMPLETED,
+        ))
+        directory = settings.artifacts_root / run_id
+        directory.mkdir(parents=True)
+        result = PipelineResult(
+            run_id=run_id, task_id=task.task_id, task_mode=TaskMode.GENERATE,
+            experiment_id="unit", method_id="unit", status=RunStatus.COMPLETED,
+            stop_reason=StopReason.QUALITY_PASSED, best_version_id="v0",
+            last_version_id="v0", versions=[make_version("v0", 0, score=8.0)],
+        )
+        export_artifacts(result, directory, include_docx=False)
+        # A listed artifact whose file is gone must not be advertised.
+        (directory / "best_lesson_plan.json").unlink()
+        (directory / "best_lesson_plan.md").unlink()
+
+        listed = EngineProjection(settings).artifacts(run_id)
+
+        self.assertEqual([], [item.artifact_id for item in listed])
+
+    def test_download_unknown_or_missing_artifact_returns_problem_404(self) -> None:
+        settings = make_settings(self.root)
+        registry = RunRegistry(settings)
+        run_id = "missing-artifact-run"
+        registry.create(RunRecord(
+            engine_run_id=run_id,
+            external_job_id=JOB_ID,
+            request_sha256=REQUEST_HASH,
+            mode=EngineMode.GENERATE,
+            task_id="test-lesson",
+            subject="数学",
+            grade="八年级",
+            topic="勾股定理",
+            status=EngineRunStatus.FAILED,
+        ))
+        headers = {"X-Engine-Token": "test-token"}
+        response = self.client.get(
+            f"/internal/v1/runs/{run_id}/artifacts/never-produced",
+            headers=headers,
+        )
+
+        self.assertEqual(404, response.status_code)
+        self.assertEqual("ENGINE_ARTIFACT_NOT_FOUND", response.json()["code"])
+
     def test_optimize_streams_original_file_into_run_directory(self) -> None:
         document = Document()
         document.add_paragraph("教学目标：理解一次函数")

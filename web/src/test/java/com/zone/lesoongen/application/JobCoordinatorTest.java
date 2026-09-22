@@ -63,4 +63,31 @@ class JobCoordinatorTest {
 
         verify(states).fail(eq(jobId), eq("ENGINE_RUNTIME_DEPENDENCY_MISSING"), any(String.class));
     }
+
+    @Test
+    void reconcileFailsJobAfterRepeatedTransientSyncFailures() {
+        JobStateService states = mock(JobStateService.class);
+        EngineClient engine = mock(EngineClient.class);
+        LessonSourceFileRepository sources = mock(LessonSourceFileRepository.class);
+        StoragePort storage = mock(StoragePort.class);
+        ArtifactIngestionService ingestion = mock(ArtifactIngestionService.class);
+        ObjectMapper mapper = new ObjectMapper();
+        LessonJob job = mock(LessonJob.class);
+        String jobId = "01J00000000000000000000001";
+
+        when(job.getId()).thenReturn(jobId);
+        when(job.getEngineRunId()).thenReturn("run-001");
+        when(states.activeJobs()).thenReturn(List.of(job));
+        when(engine.snapshot("run-001"))
+                .thenThrow(new org.springframework.web.client.ResourceAccessException(
+                        "engine unreachable"));
+
+        JobCoordinator coordinator = new JobCoordinator(
+                states, engine, sources, storage, ingestion, mapper);
+        for (int attempt = 0; attempt < 15; attempt++) {
+            coordinator.reconcile();
+        }
+
+        verify(states).fail(eq(jobId), eq("ENGINE_SYNC_FAILED"), any(String.class));
+    }
 }

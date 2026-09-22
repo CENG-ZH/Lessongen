@@ -86,13 +86,22 @@ class ValidationDecisionProposal(StrictModel):
     def validate_decision_shape(self) -> "ValidationDecisionProposal":
         if self.decision == ValidationDecisionKind.MERGE:
             if not self.canonical_critique_id:
-                raise ValueError("merge requires canonical_critique_id")
+                raise ValueError(
+                    f"critique {self.critique_id!r}: merge requires "
+                    "canonical_critique_id to name the accepted target"
+                )
         elif self.canonical_critique_id:
-            raise ValueError("canonical_critique_id is only allowed for merge")
+            raise ValueError(
+                f"critique {self.critique_id!r}: canonical_critique_id "
+                f"{self.canonical_critique_id!r} is only allowed for merge"
+            )
         if self.decision == ValidationDecisionKind.ACCEPT and not (
             self.grounded and self.relevant and self.actionable and not self.conflict
         ):
-            raise ValueError("accepted critique must pass all four validation gates")
+            raise ValueError(
+                f"critique {self.critique_id!r}: accepted critique must pass "
+                "all four validation gates"
+            )
         return self
 
 

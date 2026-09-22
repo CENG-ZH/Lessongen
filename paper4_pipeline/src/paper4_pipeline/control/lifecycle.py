@@ -374,13 +374,30 @@ def apply_validation(
             f"duplicates={duplicates}, unknown={unknown}, missing={missing}"
         )
     decisions = {item.critique_id: item for item in validation.decisions}
+    accepted_ids = sorted(
+        key for key, value in decisions.items()
+        if value.decision == ValidationDecisionKind.ACCEPT
+    )
     for decision in validation.decisions:
         if decision.decision == ValidationDecisionKind.MERGE:
             if decision.canonical_critique_id not in critique_ids:
-                raise ValueError("merge target must exist in the same critique batch")
+                raise ValueError(
+                    f"critique {decision.critique_id!r} targets "
+                    f"{decision.canonical_critique_id!r} for merge, but that ID "
+                    "does not exist in this critique batch. "
+                    f"Available IDs: {sorted(critique_ids)}"
+                )
             target_decision = decisions.get(decision.canonical_critique_id)
             if target_decision is None or target_decision.decision != ValidationDecisionKind.ACCEPT:
-                raise ValueError("merge target must be an accepted canonical critique")
+                target_kind = target_decision.decision.value if target_decision else "missing"
+                raise ValueError(
+                    f"critique {decision.critique_id!r} targets "
+                    f"{decision.canonical_critique_id!r} for merge, but that target "
+                    f"is {target_kind!r}; a merge target must be accepted in the "
+                    "same batch. Current accepted IDs: "
+                    f"{accepted_ids}. Choose an accepted target or give this "
+                    "critique its own accept/reject/defer decision."
+                )
     status_by_kind = {
         ValidationDecisionKind.ACCEPT: CritiqueStatus.ACCEPTED,
         ValidationDecisionKind.REJECT: CritiqueStatus.REJECTED,

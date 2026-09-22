@@ -100,7 +100,8 @@ async function submit() {
     <span class="eyebrow">CREATE · OPTIMIZE</span>
     <h1>让原教案变得更可教</h1>
     <p>
-      可上传其他来源的 .docx 教案，不要求使用本系统模板。原稿只读保存；导入后审查、改写，
+      可上传其他来源的 .docx
+      教案，不要求使用本系统模板。原稿只读保存；导入后审查、改写，
       最终展示实际修改前后对比。若没有可交付的内容变化，页面会如实标明。
     </p>
   </div>
@@ -110,7 +111,9 @@ async function submit() {
         <span>00</span>
         <div>
           <h2>选择原教案</h2>
-          <p>仅支持含可读取文字的 .docx，最大 20 MiB；扫描图片中的文字暂不识别。</p>
+          <p>
+            仅支持含可读取文字的 .docx，最大 20 MiB；扫描图片中的文字暂不识别。
+          </p>
         </div>
       </div>
       <label

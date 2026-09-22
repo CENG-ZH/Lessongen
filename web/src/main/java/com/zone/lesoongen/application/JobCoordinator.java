@@ -2,6 +2,8 @@ package com.zone.lesoongen.application;
 
 import java.util.List;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,12 +29,16 @@ import com.zone.lesoongen.infrastructure.persistence.LessonSourceFileRepository;
 public class JobCoordinator {
     private static final Logger log = LoggerFactory.getLogger(JobCoordinator.class);
 
+    /** Consecutive transient reconcile failures before a job is failed outright. */
+    private static final int MAX_CONSECUTIVE_RECONCILE_FAILURES = 15;
+
     private final JobStateService states;
     private final EngineClient engine;
     private final LessonSourceFileRepository sources;
     private final StoragePort storage;
     private final ArtifactIngestionService ingestion;
     private final ObjectMapper mapper;
+    private final Map<String, Integer> reconcileFailures = new HashMap<>();
 
     public JobCoordinator(JobStateService states, EngineClient engine,
             LessonSourceFileRepository sources, StoragePort storage,
@@ -107,14 +113,35 @@ public class JobCoordinator {
                     ingestion.ingestTerminal(job, snapshot);
                 }
                 states.applySnapshot(job.getId(), snapshot, events);
+                reconcileFailures.remove(job.getId());
             } catch (AppException error) {
+                reconcileFailures.remove(job.getId());
                 states.fail(job.getId(), error.code(), error.getMessage());
             } catch (RestClientException error) {
                 log.warn("engine reconciliation temporarily failed for job {}: {}",
                         job.getId(), error.getClass().getSimpleName());
+                failAfterRepeatedTransientErrors(job);
             } catch (Exception error) {
                 log.error("job reconciliation failed for {}", job.getId(), error);
+                failAfterRepeatedTransientErrors(job);
             }
+        }
+    }
+
+    /**
+     * A transient engine sync failure must not leave a job "running" forever:
+     * after {@link #MAX_CONSECUTIVE_RECONCILE_FAILURES} consecutive transient
+     * failures the job is failed so the user gets a terminal, actionable state
+     * instead of an endless spinner.
+     */
+    private void failAfterRepeatedTransientErrors(LessonJob job) {
+        int failures = reconcileFailures.merge(job.getId(), 1, Integer::sum);
+        if (failures >= MAX_CONSECUTIVE_RECONCILE_FAILURES) {
+            reconcileFailures.remove(job.getId());
+            log.error("failing job {} after {} consecutive transient reconcile failures",
+                    job.getId(), failures);
+            states.fail(job.getId(), "ENGINE_SYNC_FAILED",
+                    "引擎状态同步持续失败，任务已终止，请查看恢复产物或创建新的重试");
         }
     }
 

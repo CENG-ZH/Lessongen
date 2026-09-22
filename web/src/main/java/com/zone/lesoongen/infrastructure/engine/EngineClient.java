@@ -115,10 +115,23 @@ public class EngineClient {
     }
 
     public byte[] download(String engineRunId, String artifactId) {
-        return retry(() -> require(client.get()
-                .uri("/internal/v1/runs/{id}/artifacts/{artifactId}", engineRunId, artifactId)
-                .retrieve()
-                .body(byte[].class)));
+        try {
+            return retry(() -> require(client.get()
+                    .uri("/internal/v1/runs/{id}/artifacts/{artifactId}", engineRunId, artifactId)
+                    .retrieve()
+                    .body(byte[].class)));
+        } catch (RestClientResponseException error) {
+            // A 404 on an artifact the engine itself listed means the file is
+            // gone, not temporarily unavailable. Surface it as a terminal
+            // AppException so reconciliation fails the job instead of treating
+            // it as a transient sync failure and leaving the job "running"
+            // forever. 5xx responses keep the transient path via retry().
+            if (error.getStatusCode().value() == HttpStatus.NOT_FOUND.value()) {
+                throw new AppException(HttpStatus.BAD_GATEWAY, "ENGINE_ARTIFACT_NOT_FOUND",
+                        "Python 引擎产物丢失（" + artifactId + "）");
+            }
+            throw translate(error);
+        }
     }
 
     private static <T> T retry(Supplier<T> operation) {
