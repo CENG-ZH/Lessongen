@@ -77,7 +77,7 @@ LangGraph / PipelineService
 
 ## 技术栈
 
-- Python 3.10+、Pydantic 2、LangGraph、FastAPI；
+- Python 3.11、uv 锁文件、Pydantic 2、LangGraph、FastAPI；
 - DeepSeek OpenAI-compatible API；
 - Java 17、Spring Boot 4、Spring Data JPA、Flyway；
 - MySQL 8；
@@ -86,95 +86,75 @@ LangGraph / PipelineService
 
 ## 快速启动
 
-### 1. Python 引擎
+唯一推荐运行目录是当前 Git 仓库根目录；在你的机器上是 `F:\comalesson\Lessongen`。`C:\Users\Administrator\Desktop\PR` 只是旧副本，不再作为启动入口。请先停止旧 C 盘服务，避免 5173/8080 端口被旧进程占用；不要删除旧数据。
+
+### 一键启动完整 Web（推荐）
 
 ```bat
-conda create -n PR4 python=3.10 -y
-conda activate PR4
-cd /d <仓库目录>\paper4_pipeline
-python -m pip install -e ".[web,dev]"
-copy .env.example .env
-notepad .env
-python -m paper4_pipeline.web_api
+cd /d F:\comalesson\Lessongen
+scripts\up.cmd
 ```
 
-`paper4_pipeline/.env` 至少填写：
+前提仅需 Docker Desktop。首次运行会在仓库根目录创建被 Git 忽略的 `.env`：若已有 `paper4_pipeline/.env`，会复用其中的 DeepSeek Key 和内部 Token；否则只会在终端隐藏式询问 Key，其余密码自动生成。它不会打印密钥。此命令构建并启动 MySQL、Python 引擎、Spring Boot 和前端，等待服务启动后访问 `http://127.0.0.1:5173`。生成/优化教案会调用付费模型，启动与健康检查不会。关闭时运行 `scripts\down.cmd`，不会删除数据库卷或教案文件。
+
+Docker 数据独立保存在 `runtime/engine/`、`runtime/web/` 和 Docker 命名卷中，不会自动迁移旧的 C/F 历史任务。MySQL 映射主机 `3307`，Java 映射 `8080`；引擎 `8001` 仅供容器内部访问。若旧进程占用这些端口，先确认进程来源并停止旧服务，再运行启动命令。不要对已有数据库卷随意更换 `.env` 中的 DB 密码。
+
+### 不使用 Docker 的 Python 开发
+
+不再要求 `conda PR4`。只需安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)；仓库 `.python-version` 固定 Python 3.11，uv 在本机没有该版本时会自动下载。然后在仓库根目录执行：
+
+```bat
+cd /d F:\comalesson\Lessongen
+uv sync --project paper4_pipeline --locked --extra web --extra dev
+web\scripts\start-web-engine.cmd --check
+web\scripts\start-web-engine.cmd
+```
+
+启动脚本只使用 `paper4_pipeline\.venv`，并检查实际导入的 Provider 必须来自本仓库；`--check` 不启动服务或调用付费模型。需在仓库根 `.env` 设置 `DEEPSEEK_API_KEY` 和 `ENGINE_INTERNAL_TOKEN`（可先运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup-local.ps1`）。本地 CLI 也使用同一个环境：
+
+```bat
+paper4_pipeline\.venv\Scripts\python.exe -m paper4_pipeline.cli generate
+```
+
+如需独立启动 Java/Vue，可见 [Web Quickstart](web/specs/001-lesson-plan-web/quickstart.md)；完整 Web 优先使用上面的一键 Docker 入口。
+
+根目录 `.env` 的可配置项参见 [示例](.env.example)：
 
 ```dotenv
 DEEPSEEK_API_KEY=你的真实密钥
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ENGINE_INTERNAL_TOKEN=一段随机长字符串
-PAPER4_WEB_STATE_ROOT=./var/engine-state
-PAPER4_ARTIFACTS_ROOT=./var/engine-artifacts
-PAPER4_CONFIG_PATH=./configs/deepseek_v4_flash.json
+DB_PASSWORD=本地数据库密码
+MYSQL_ROOT_PASSWORD=另一个数据库密码
 ```
-
-健康检查：`http://127.0.0.1:8001/internal/v1/health`。
-
-### 2. MySQL
-
-```bat
-cd /d <仓库目录>\web
-copy .env.example .env
-notepad .env
-docker compose up -d mysql
-docker compose ps
-```
-
-Docker Compose 默认使用主机端口 `3307`。
-
-### 3. Spring Boot
-
-Spring Boot 不自动读取 `.env`，请在启动终端或 IDEA Run Configuration 设置：
-
-```bat
-set DB_URL=jdbc:mysql://127.0.0.1:3307/lesoongen?useUnicode=true^&characterEncoding=utf8^&serverTimezone=UTC
-set DB_USERNAME=lesoongen
-set DB_PASSWORD=与web\.env一致
-set ENGINE_BASE_URL=http://127.0.0.1:8001
-set ENGINE_INTERNAL_TOKEN=与Python端完全一致
-set LESSON_STORAGE_ROOT=./var/storage
-cd /d <仓库目录>\web
-mvnw.cmd spring-boot:run
-```
-
-后端健康检查：`http://127.0.0.1:8080/actuator/health`。
-
-### 4. Vue
-
-```bat
-cd /d <仓库目录>\web\frontend
-npm install
-npm run dev
-```
-
-访问 `http://127.0.0.1:5173`。
 
 ## 测试
 
 ```bat
-cd /d <仓库目录>\paper4_pipeline
-python -m pytest -q
+cd /d F:\comalesson\Lessongen
+paper4_pipeline\.venv\Scripts\python.exe -m pytest -q paper4_pipeline\tests
 
-cd /d <仓库目录>\web
+cd web
 mvnw.cmd test
 
-cd /d <仓库目录>\web\frontend
+cd frontend
+npm ci
 npm test
 npm run lint
 npm run build
 ```
 
-当前离线验证：Python 163 项通过；Java 21 项通过、1 项按环境跳过；Vue 6 项通过，lint 和生产构建通过。自动测试不会调用付费模型。
+GitHub Actions 对 Python 锁文件、Java/MySQL 迁移、Vue 静态与 E2E、Docker 镜像构建及密钥泄露进行检查。自动测试不会调用付费模型；本机若未启动 Docker，Java 的 Testcontainers 迁移测试会跳过，CI 会把这种跳过判为失败。
 
 ## 运行数据
 
-默认数据写入被 Git 忽略的目录：
+一键 Docker 路线的数据写入被 Git 忽略的目录与 Docker 命名卷：
 
 ```text
-paper4_pipeline/var/engine-state/
-paper4_pipeline/var/engine-artifacts/
-web/var/storage/
+runtime/engine/engine-state/
+runtime/engine/engine-artifacts/
+runtime/web/web-storage/
+Docker 卷 lessongen_mysql_data
 ```
 
 其中可能包含上传原文、生成教案、模型响应、trace 和费用信息，不得提交到公共仓库。

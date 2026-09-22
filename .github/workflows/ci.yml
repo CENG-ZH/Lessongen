@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python engine
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: paper4_pipeline
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install uv
+        run: python -m pip install uv==0.11.16
+      - name: Install locked dependencies
+        run: uv sync --locked --extra web --extra dev
+      - name: Verify repository import and run offline tests
+        run: |
+          uv run --no-sync python -c "import paper4_pipeline; assert '/paper4_pipeline/src/' in paper4_pipeline.__file__"
+          uv run --no-sync python -m pytest -q --junitxml=pytest-results.xml
+      - name: Save Python test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-tests
+          path: paper4_pipeline/pytest-results.xml
+          if-no-files-found: ignore
+
+  java:
+    name: Spring Boot and real MySQL migration
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: web/pom.xml
+      - name: Require Docker for Testcontainers
+        run: docker info >/dev/null
+      - name: Run Java tests
+        run: |
+          chmod +x ./mvnw
+          ./mvnw -B -ntp test
+      - name: Ensure MySQL migration test actually ran
+        run: |
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+          reports = glob.glob('target/surefire-reports/*MySqlMigrationTest.xml')
+          assert len(reports) == 1, f'MySQL migration report missing: {reports}'
+          suite = ET.parse(reports[0]).getroot()
+          assert int(suite.get('tests', '0')) > 0, 'MySQL migration test did not execute'
+          assert int(suite.get('skipped', '0')) == 0, 'MySQL migration test was skipped'
+          assert int(suite.get('failures', '0')) == 0 and int(suite.get('errors', '0')) == 0
+          PY
+      - name: Save Java test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: java-tests
+          path: web/target/surefire-reports/
+          if-no-files-found: ignore
+
+  frontend:
+    name: Vue quality gates
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run lint:openapi
+      - run: npm run build
+      - name: Install the E2E browser
+        run: npx playwright install --with-deps msedge
+      - run: npm run test:e2e
+      - name: Save browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-e2e-failures
+          path: |
+            web/frontend/test-results/
+            web/frontend/playwright-report/
+          if-no-files-found: ignore
+
+  docker:
+    name: Build one-click stack
+    runs-on: ubuntu-24.04
+    env:
+      DEEPSEEK_API_KEY: ci-placeholder
+      ENGINE_INTERNAL_TOKEN: ci-placeholder
+      DB_PASSWORD: ci-placeholder
+      MYSQL_ROOT_PASSWORD: ci-placeholder
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Compose without real credentials
+        run: docker compose -f compose.yaml config --quiet
+      - name: Build all application images
+        run: docker compose -f compose.yaml build engine backend frontend
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

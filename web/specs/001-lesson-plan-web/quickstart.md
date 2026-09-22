@@ -1,80 +1,71 @@
-# 本地开发 Quickstart
+# Lessongen 启动指南
 
-下列命令按 Windows Anaconda Prompt / CMD 编写。`<仓库目录>` 表示 Git 仓库根目录。
+本仓库唯一推荐的源码入口是 `F:\comalesson\Lessongen`。旧 `C:\Users\Administrator\Desktop\PR` 是历史副本；启动前停止旧 C 盘服务，避免打开同一网址却访问到旧代码。不要删除旧数据库或教案文件。
 
-## 1. 前置环境
+## 一键启动（推荐）
 
-- Python 3.10+ 与 Conda 环境 `PR4`；
-- JDK 17；
-- Node.js LTS 与 npm；
-- Docker Desktop，或本机 MySQL 8；
-- 可用的 DeepSeek API Key。
-
-## 2. Python Engine
+安装并启动 Docker Desktop，然后在 Windows CMD / Anaconda Prompt 中执行：
 
 ```bat
-cd /d "<仓库目录>\paper4_pipeline"
-conda activate PR4
-python -m pip install -e ".[web,dev]"
-copy .env.example .env
-notepad .env
-python -m paper4_pipeline.web_api
+cd /d F:\comalesson\Lessongen
+scripts\up.cmd
 ```
 
-`.env` 中必须设置 `DEEPSEEK_API_KEY` 和随机的 `ENGINE_INTERNAL_TOKEN`。
-
-## 3. MySQL
+首次运行会创建被 Git 忽略的仓库根 `.env`。脚本会复用现有 F 盘 `paper4_pipeline/.env` 中的 DeepSeek Key 和内部 Token；若无 Key，仅隐藏式询问一次。数据库密码由本机随机生成。随后 Docker 构建并启动 MySQL、Python 引擎、Spring Boot 和前端。访问 `http://127.0.0.1:5173`。启动本身不调用付费模型。
 
 ```bat
-cd /d "<仓库目录>\web"
-copy .env.example .env
-notepad .env
-docker compose up -d mysql
 docker compose ps
+docker compose logs --tail=100 engine backend
+scripts\down.cmd
 ```
 
-默认从主机 `3307` 访问容器数据库。
+`down.cmd` 仅停止容器，不删除 MySQL 卷和运行数据。Docker 路线的上传件与产物在仓库 `runtime/`，数据库在 Docker 命名卷，均与旧 C/F 历史实例隔离。切勿用 `down -v` 或直接删卷来处理启动故障。MySQL 主机端口为 3307，后端为 8080；引擎 8001 不映射到主机。若 5173/8080/3307 被旧服务占用，请先确认来源并停止旧服务，不要盲目关闭进程。
 
-## 4. Spring Boot
+仓库内旧 `web/compose.yaml` 只提供 MySQL，不要与根目录的全栈 `compose.yaml` 同时启动；两者都使用主机 3307，且数据库卷不同。
 
-另开 CMD，并设置与 `web/.env`、Python `.env` 一致的值：
+## 仅开发 Python 引擎时
+
+只安装 uv 即可；它会按仓库 `.python-version` 自动准备 Python 3.11，不需要 Conda PR4：
 
 ```bat
-set DB_URL=jdbc:mysql://127.0.0.1:3307/lesoongen?useUnicode=true^&characterEncoding=utf8^&serverTimezone=UTC
-set DB_USERNAME=lesoongen
-set DB_PASSWORD=你的本地数据库密码
-set ENGINE_BASE_URL=http://127.0.0.1:8001
-set ENGINE_INTERNAL_TOKEN=与Python相同的随机字符串
-set LESSON_STORAGE_ROOT=./var/storage
-cd /d "<仓库目录>\web"
-mvnw.cmd spring-boot:run
+cd /d F:\comalesson\Lessongen
+uv sync --project paper4_pipeline --locked --extra web --extra dev
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup-local.ps1
+web\scripts\start-web-engine.cmd --check
+web\scripts\start-web-engine.cmd
 ```
 
-Flyway 自动建表。健康检查：`http://127.0.0.1:8080/actuator/health`。
+启动脚本强制使用 `paper4_pipeline\.venv` 并打印实际 Provider 路径、配置路径和数据根（不打印密钥）。`--check` 是无费用检查。若曾在 PR4 安装 C 盘 editable 包，本命令也不会导入它。
 
-## 5. Vue
+## 单独调试 Java / Vue
+
+推荐用 Docker Compose 保持数据库和 Python 引擎运行，修改 Java 时在 IDEA 打开 F 盘的 `web/pom.xml`，只重启 `backend` 服务（避免两个后端同时占用 8080）。如果必须在 IDEA 直接运行，先停止 Docker backend，并在 Run Configuration 中设置：`DB_URL=jdbc:mysql://127.0.0.1:3307/lesoongen?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC`、`DB_USERNAME=lesoongen`、根 `.env` 里的 `DB_PASSWORD` 与 `ENGINE_INTERNAL_TOKEN`，以及 `ENGINE_BASE_URL` 指向可从主机访问的 Python 8001。注意 Docker 引擎默认不暴露 8001，故 IDEA 单跑后端时应按上节在主机启动 Python 引擎。
+
+Vue 开发：
 
 ```bat
-cd /d "<仓库目录>\web\frontend"
-npm install
+cd /d F:\comalesson\Lessongen\web\frontend
+npm ci
 npm run dev
 ```
 
-访问 `http://127.0.0.1:5173`。
+Vue Vite 开发代理默认把 `/api` 发到主机 8080。不要把模型 Key 放进前端变量。
 
-## 6. 自动测试
+## 离线测试
 
 ```bat
-cd /d "<仓库目录>\paper4_pipeline"
-python -m pytest -q
-
-cd /d "<仓库目录>\web"
+cd /d F:\comalesson\Lessongen
+paper4_pipeline\.venv\Scripts\python.exe -m pytest -q paper4_pipeline\tests
+cd web
 mvnw.cmd test
-
-cd /d "<仓库目录>\web\frontend"
+cd frontend
+npm ci
 npm test
+npm run typecheck
 npm run lint
+npm run format:check
+npm run lint:openapi
 npm run build
 ```
 
-自动测试不得调用真实付费模型。真实验收使用脱敏材料，并检查结果页、Word 和优化报告是否一致。
+本机 Docker 未启动时，Java Testcontainers 迁移测试会跳过；CI 要求该测试真实执行。以上测试不调用 DeepSeek。真实生成/优化前，请确认输入材料授权与账户余额。

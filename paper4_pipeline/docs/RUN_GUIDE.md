@@ -1,32 +1,31 @@
 # Paper#4 运行指南
 
-本文命令适用于 Windows Anaconda Prompt / CMD。路径中的 `<仓库目录>` 请替换为本机仓库根目录。
+本文命令适用于 Windows CMD/Anaconda Prompt，但不依赖 Conda。唯一推荐的源码位置是 `F:\comalesson\Lessongen`；切勿从 C 盘旧副本启动。
 
 ## 1. 安装
 
 ```bat
-conda create -n PR4 python=3.10 -y
-conda activate PR4
-cd /d "<仓库目录>\paper4_pipeline"
-python -m pip install -e ".[web,dev]"
+cd /d F:\comalesson\Lessongen
+uv sync --project paper4_pipeline --locked --extra web --extra dev
+cd paper4_pipeline
 ```
+
+只需先安装 uv：`.python-version` 固定 Python 3.11，uv 缺少该版本时会自动下载；`uv.lock` 固定 Python 依赖，虚拟环境始终创建在本仓库 `paper4_pipeline\.venv`。旧 PR4 环境及其 C 盘 editable 包不再参与运行。若要启动完整 Web，直接在仓库根运行 `scripts\up.cmd`（需 Docker Desktop），无需分别安装三端环境。
 
 ## 2. 环境变量
 
 ```bat
-copy .env.example .env
-notepad .env
+cd /d F:\comalesson\Lessongen
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup-local.ps1
+cd paper4_pipeline
 ```
 
-至少设置：
+仓库根 `.env` 是唯一推荐的本地配置；脚本会优先复用本仓库旧 `paper4_pipeline/.env` 中的 Key/Token，否则隐藏式询问 Key。不会覆盖已存在的根 `.env`。至少需要：
 
 ```dotenv
 DEEPSEEK_API_KEY=你的真实密钥
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ENGINE_INTERNAL_TOKEN=随机长字符串
-PAPER4_WEB_STATE_ROOT=./var/engine-state
-PAPER4_ARTIFACTS_ROOT=./var/engine-artifacts
-PAPER4_CONFIG_PATH=./configs/deepseek_v4_flash.json
 ```
 
 `.env` 已被 Git 忽略。不要把真实 Key、Token 或用户教案提交到仓库。
@@ -34,8 +33,8 @@ PAPER4_CONFIG_PATH=./configs/deepseek_v4_flash.json
 ## 3. 无费用检查
 
 ```bat
-python -m paper4_pipeline.cli check
-python -m pytest -q
+.venv\Scripts\python.exe -m paper4_pipeline.cli check
+.venv\Scripts\python.exe -m pytest -q
 ```
 
 这些命令不会调用付费模型。
@@ -43,7 +42,7 @@ python -m pytest -q
 ## 4. 交互生成
 
 ```bat
-python -m paper4_pipeline.cli generate
+.venv\Scripts\python.exe -m paper4_pipeline.cli generate
 ```
 
 科目、年级、课题为必填；其余字段可回车跳过。系统在第一次付费调用前显示任务摘要并请求确认。
@@ -51,7 +50,7 @@ python -m paper4_pipeline.cli generate
 ## 5. JSON 任务运行
 
 ```bat
-python -m paper4_pipeline.cli run --task ".\examples\sample_task.json"
+.venv\Scripts\python.exe -m paper4_pipeline.cli run --task ".\examples\sample_task.json"
 ```
 
 可用 `--output` 指定其他产物目录；不指定时写入 `PAPER4_ARTIFACTS_ROOT`。
@@ -59,8 +58,11 @@ python -m paper4_pipeline.cli run --task ".\examples\sample_task.json"
 ## 6. 启动 Web 内部引擎
 
 ```bat
-python -m paper4_pipeline.web_api
+..\web\scripts\start-web-engine.cmd --check
+..\web\scripts\start-web-engine.cmd
 ```
+
+脚本强制使用 F 仓库 `.venv` 并确认 Provider 来自本仓库；还会检查 Key/Token 是否存在和配置文件路径。`--check` 不启动服务，也不调用付费模型，不打印密钥值。
 
 默认地址为 `http://127.0.0.1:8001`，健康检查为：
 
@@ -88,9 +90,9 @@ curl http://127.0.0.1:8001/internal/v1/health
 ## 8. 离线检查历史结果
 
 ```bat
-python -m paper4_pipeline.cli inspect --result ".\var\engine-artifacts\<run_id>\run_result.json"
-python -m paper4_pipeline.cli export-process --run-dir ".\var\engine-artifacts\<run_id>"
-python -m paper4_pipeline.cli analyze --artifacts ".\var\engine-artifacts"
+.venv\Scripts\python.exe -m paper4_pipeline.cli inspect --result ".\var\engine-artifacts\<run_id>\run_result.json"
+.venv\Scripts\python.exe -m paper4_pipeline.cli export-process --run-dir ".\var\engine-artifacts\<run_id>"
+.venv\Scripts\python.exe -m paper4_pipeline.cli analyze --artifacts ".\var\engine-artifacts"
 ```
 
 ## 9. 常见问题

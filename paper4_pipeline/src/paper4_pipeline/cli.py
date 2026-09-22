@@ -25,6 +25,7 @@ from paper4_pipeline.service import PipelineService
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT.parent / ".env", override=False)
 load_dotenv(PROJECT_ROOT / ".env", override=False)
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "deepseek_v4_flash.json"
 DEFAULT_OUTPUT = Path(

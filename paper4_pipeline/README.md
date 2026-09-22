@@ -43,22 +43,23 @@ LessonTask
 
 ## 环境与安装
 
-Python 3.10 以上：
+推荐 Python 3.11 + uv，直接使用 F 仓库的锁文件，不依赖 Conda PR4：
 
 ```bat
-conda activate PR4
-cd /d "<仓库目录>\paper4_pipeline"
-python -m pip install -e ".[web]"
+cd /d F:\comalesson\Lessongen
+uv sync --project paper4_pipeline --locked --extra web --extra dev
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup-local.ps1
+web\scripts\start-web-engine.cmd --check
 ```
 
-仓库根目录 `.env`：
+完整 Web 可只安装 Docker Desktop，再从仓库根运行 `scripts\up.cmd`，无需本机 Python/Java/Node。仓库根 `.env`：
 
 ```dotenv
 DEEPSEEK_API_KEY=你的真实密钥
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-可从 `.env.example` 复制变量名。程序只把变量名和“是否存在”写入诊断，不导出密钥值。
+可从仓库根 `.env.example` 复制变量名。程序只把变量名和“是否存在”写入诊断，不导出密钥值。
 
 ## Web Engine
 
@@ -70,7 +71,7 @@ Engine 状态和教案产物默认写入项目内被 Git 忽略的 `var/engine-s
 `var/engine-artifacts`；环境变量可覆盖默认值。
 
 ```bat
-python -m paper4_pipeline.web_api
+..\web\scripts\start-web-engine.cmd
 ```
 
 默认只监听 `127.0.0.1:8001`，用一个持久化工作进程串行执行付费任务。除健康检查外，
@@ -90,7 +91,7 @@ python -m paper4_pipeline.web_api
 日常使用推荐直接启动交互式生成器：
 
 ```bat
-python -m paper4_pipeline.cli generate
+.venv\Scripts\python.exe -m paper4_pipeline.cli generate
 ```
 
 只需填写科目、年级和课题；可选字段可以直接回车，课时、课程说明、教学风格、详细程度等有合理默认值。程序会先保存输入并显示摘要，得到确认后才调用真实模型。配置、输出目录、Word 导出和 `run_id` 均已默认。
@@ -98,13 +99,13 @@ python -m paper4_pipeline.cli generate
 运行已有 JSON 文件时也只需提供任务文件：
 
 ```bat
-python -m paper4_pipeline.cli run --task ".\examples\sample_task.json"
+.venv\Scripts\python.exe -m paper4_pipeline.cli run --task ".\examples\sample_task.json"
 ```
 
 先做无费用配置检查：
 
 ```bat
-python -m paper4_pipeline.cli check
+.venv\Scripts\python.exe -m paper4_pipeline.cli check
 ```
 
 自动运行目录名采用 `时间-科目-年级-课题-随机后缀`，既能看懂也不会轻易冲突；交互时可以选填短名称，或用 `--run-name "勾股定理公开课"`。运行结束后，控制台会显示实际 `run_id` 和完整产物目录。
@@ -144,9 +145,8 @@ Provider 使用 DeepSeek JSON Output，并用 Pydantic 再校验；空响应、�
 ## 测试
 
 ```bat
-conda activate PR4
-cd /d "<仓库目录>\paper4_pipeline"
-python -m pytest -q
+cd /d F:\comalesson\Lessongen\paper4_pipeline
+.venv\Scripts\python.exe -m pytest -q
 ```
 
 离线测试只检查领域合同、路由、生命周期、配置、Prompt 哈希、异质知识和导出，不伪装成模型效果。正式验收必须额外完成一次真实 API 运行并检查 trace 中八类角色的模型元数据。

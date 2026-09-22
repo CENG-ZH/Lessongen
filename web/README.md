@@ -35,14 +35,7 @@ specs/001-lesson-plan-web          完整 Spec、契约、数据模型和任务�
 
 ## 开始运行
 
-完整的 Windows Anaconda Prompt / CMD 命令见 [Quickstart](specs/001-lesson-plan-web/quickstart.md)。最短顺序为：
-
-1. 启动 MySQL 8.x（可使用 `docker compose up -d mysql`），由 Flyway 自动建表；
-2. 在 `paper4_pipeline` 的 `PR4` 环境启动 FastAPI（8001）；
-3. 在本目录运行 `mvnw.cmd spring-boot:run`（8080）；
-4. 在 `frontend` 运行 `npm run dev`（5173）。
-
-三个服务中的 `ENGINE_INTERNAL_TOKEN` 必须保持一致（Vue 不设置此变量）。真实生成还需要 Python 环境中的 `DEEPSEEK_API_KEY`。
+完整步骤见 [Quickstart](specs/001-lesson-plan-web/quickstart.md)。推荐从 F 盘仓库根运行 `scripts\up.cmd`，Docker Compose 会用同一份根 `.env` 启动 MySQL、Python、Java、Vue，无需 Conda PR4 或手动对齐三个终端的 Token。访问 `http://127.0.0.1:5173`。仅在需要单独调试服务时按 Quickstart 的本地开发步骤启动。
 
 ## 验证
 
@@ -61,9 +54,9 @@ npm audit --audit-level=high
 Python 项目：
 
 ```bat
-conda activate PR4
-python -m pip install -e ".[web,dev]"
-python -m pytest -q
+cd /d F:\comalesson\Lessongen
+uv sync --project paper4_pipeline --locked --extra web --extra dev
+paper4_pipeline\.venv\Scripts\python.exe -m pytest -q paper4_pipeline\tests
 ```
 
 这些命令不会调用付费模型。执行真实生成或优化前，请确认账户余额和输入材料不含敏感数据。

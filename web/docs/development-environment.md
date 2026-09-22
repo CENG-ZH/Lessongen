@@ -1,5 +1,7 @@
 # 开发环境基线
 
+> 本页是 2026-09-15 的历史快照，不是当前安装指南。当前唯一推荐入口见仓库根 [README](../../README.md)：`uv.lock`/`.venv` 或根目录 Docker Compose，不再依赖 Conda PR4。
+
 2026-09-15 在交付目录实测：
 
 - Windows 11 x64；

@@ -32,6 +32,10 @@ class EngineSettings:
 
     @classmethod
     def from_environment(cls) -> "EngineSettings":
+        # A single repository-level .env is shared by the local launchers and
+        # Docker Compose. Keep the older project-local file as a fallback for
+        # existing installations; explicit process variables always win.
+        load_dotenv(PROJECT_ROOT.parent / ".env")
         load_dotenv(PROJECT_ROOT / ".env")
         base = _path_env(
             "PAPER4_WEB_STATE_ROOT", DEFAULT_RUNTIME_ROOT / "engine-state"
