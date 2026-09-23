@@ -56,6 +56,30 @@ jobs:
         run: |
           chmod +x ./mvnw
           ./mvnw -B -ntp test
+      - name: Publish Java failure details
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+
+          found = False
+          for report in glob.glob('target/surefire-reports/TEST-*.xml'):
+              suite = ET.parse(report).getroot()
+              for case in suite.findall('testcase'):
+                  problem = case.find('failure')
+                  if problem is None:
+                      problem = case.find('error')
+                  if problem is None:
+                      continue
+                  found = True
+                  test_id = f"{case.get('classname', '')}.{case.get('name', '')}"
+                  detail = (problem.get('message') or problem.text or 'unknown failure')
+                  detail = ' '.join(detail.split())[:1500]
+                  print(f'::error title=Java test failed: {test_id}::{detail}')
+          if not found:
+              print('::error title=Java build failed::Maven failed before producing a failing Surefire test case; inspect the Run Java tests step.')
+          PY
       - name: Ensure MySQL migration test actually ran
         run: |
           python3 - <<'PY'
