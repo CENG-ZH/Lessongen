@@ -3,11 +3,16 @@ package com.zone.lesoongen.infrastructure.persistence;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.SQLException;
 
 import javax.sql.DataSource;
 
+import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -58,5 +63,21 @@ class MySqlMigrationTest {
                 "ORIGINAL_LESSON_DOCX", "lesson.docx",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 1, "0".repeat(64), "jobs/test/input.docx", "PENDING"));
+    }
+
+    @Test
+    void invalidFollowUpMigrationFailsLoudly(@TempDir Path migrationDirectory) throws Exception {
+        Files.writeString(
+                migrationDirectory.resolve("V4__intentionally_invalid.sql"),
+                "THIS IS NOT VALID MYSQL SQL;");
+
+        Flyway invalidFlyway = Flyway.configure()
+                .dataSource(dataSource)
+                .locations(
+                        "classpath:db/migration",
+                        "filesystem:" + migrationDirectory.toAbsolutePath().toString().replace('\\', '/'))
+                .load();
+
+        assertThrows(FlywayException.class, invalidFlyway::migrate);
     }
 }

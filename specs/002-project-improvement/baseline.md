@@ -63,3 +63,16 @@ npm test
 - 提交序列（本地 main，未推送）：`5d8d999` fix（引擎产物下载加固、合并意见错误上下文、Prettier）；`4183324` build（Compose/Dockerfile/CI/脚本/uv.lock/启动诊断/文档）；`5299e71` docs（002 规格）。提交前敏感扫描：无真实 Key/Token/PEM 模式（命中的 `DEEPSEEK_API_KEY=你的真实密钥` 均为占位符）。
 - 仍留待确认：`paper4_pipeline/configs/deepseek_v4_flash.json` 的 writer/rewriter `max_tokens` 12288→24576 改动未提交（属问题 1 延续，未经验证，是否保留需项目负责人决定）。
 - 未勾选 `tasks.md` 的原因：T006 依赖 Gate 0A（T001–T005 尚未验收）；Docker 镜像构建、全栈启动、GitHub Actions 平台运行与 gitleaks 扫描需要 Docker 引擎和 GitHub 远端，本机未执行；MySQL 迁移测试的真实执行只能在 CI ubuntu 完成。以上属平台级验证，非代码缺陷。
+
+## 7. P0 最终验收（2026-09-23）
+
+本节取代第 5–6 节中的“尚未验收”状态；前文作为过程记录保留，不回写历史事实。
+
+- **唯一来源与可追踪构建：** 根 `scripts\up.cmd` 从干净工作树构建四服务。运行中的 Python `/internal/v1/health` 与 Java `/actuator/info` 均报告提交 `fad6425e7d3e`、`dirty=false`；Java 标记 `runtime=container`，Python 同时报告包版本、配置 SHA256、worker/config/model 已就绪。容器挂载源均为 `F:/comalesson/runtime/lesoongen -> /data`，不是 C 盘旧工程。
+- **历史目录：** `scripts/audit-runtime.py` 只读验证代表性历史交付的 JSON、Markdown、DOCX 包和 manifest 哈希，以及 engine state、上传原件和 Web result。未移动或改写旧文件。审计同时发现 `my-first-live-run` 的旧 Word 与 manifest 哈希不一致；该 run 被跳过并保留原状，不能把它作为完整性样本。
+- **本机离线回归：** Python **175 passed**；前端 **6** 项 Vitest、typecheck、ESLint、Prettier、OpenAPI lint、build 与 **7/7** Playwright E2E 通过；Java 全量回归与 MySQL 8.0.44 Testcontainers 通过。MySQL 专项还验证了 Flyway v1–v3 从空库迁移、外键约束拒绝坏数据，以及故意无效 V4 迁移必须抛出 `FlywayException`。
+- **运行栈：** MySQL、engine、backend、frontend 四容器均为 `healthy`；后端 8080 和前端 5173 冒烟成功；Flyway 历史 v1–v3 均 `success=1`。健康与启动不调用 DeepSeek。
+- **远端 CI：** GitHub Actions run [`35816829870`](https://github.com/CENG-ZH/Lessongen/actions/runs/35816829870) 的 Python、Spring Boot + real MySQL、Vue quality gates、Docker full-stack smoke 与 Secret scan 五个 job 全部成功。上一轮 Java job 有一次 runner 波动，重跑成功；工作流已增加失败 JUnit 注解，后续失败不再只显示 exit code。
+- **提交与敏感信息：** 历史/索引规则扫描未发现 Key、GitHub Token、私钥或云凭据模式；gitleaks 远端 job 成功。被跟踪的 `.env` 仅为三个示例文件，真实 `.env`、DOCX、日志、运行目录均未入库。模型输出预算改动以独立提交 `0c90dce` 保留；P0 工程收口为 `fad6425`，失败诊断增强为 `2fb5eeb`，可分别回滚。
+
+结论：Gate 0A 与 Gate P0 均通过。该结论只证明环境、构建、迁移、离线契约和启动链路可复现，不证明真实模型生成质量、优化成效或论文假设；后者仍属于 P1–P3。

@@ -28,7 +28,7 @@ Vue（只请求 Java）
 1. Python 引擎启动时验证真实 `paper4_pipeline` 包路径；输出仓库 commit、dirty、Python/依赖版本、配置绝对路径及 SHA-256、Writer/Rewriter `max_tokens`、状态和产物根。`--check` 只做本地检查，不起服务、不调用模型。
 2. Java 构建写入 Git commit/build 信息；本地健康诊断显示构建 ID、引擎是否可达与数据库可达，但公开 `/actuator/health` 保持最小暴露。启动时校验 `ENGINE_INTERNAL_TOKEN` 和 DB 配置是否非空，不输出内容。
 3. 端口冲突时展示已占用端口与“可能运行了另一套工程”的提示；不要自动杀进程。将生产运行的配置指纹写入每个 `run_result`/诊断元数据，解释 `--check` 与真实进程不同的情况。
-4. F 引擎 `.env` 明确 `PAPER4_CONFIG_PATH` 和旧 `PAPER4_WEB_STATE_ROOT`、`PAPER4_ARTIFACTS_ROOT`；F Java 明确本机 MySQL 3306 的 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、同一内部 Token、旧 `LESSON_STORAGE_ROOT`。如果选择 Docker，全部改为 3307 且使用另一套独立数据，不混用历史任务。
+4. 仓库根 `.env` 统一声明旧 `PAPER4_WEB_STATE_ROOT`、`PAPER4_ARTIFACTS_ROOT`、`LESSON_STORAGE_ROOT` 与同一内部 Token；Python/Java 容器共同挂载 `LESSONGEN_RUNTIME_ROOT`。完整产品固定使用根 Compose 的 MySQL 3307，本机 MySQL 3306 只保留为旧实例，不参与一键启动；历史文件不搬移、不覆盖。
 
 ### 1.3 环境与 CI
 

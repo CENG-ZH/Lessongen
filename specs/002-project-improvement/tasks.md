@@ -4,23 +4,23 @@
 
 ## Phase 0A · 先排除 C/F 混用（P0，阻断后续工作）
 
-- [ ] **T001 基线冻结**｜依赖：无。记录 HEAD、dirty 文件清单、当前 8001/8080/3306 服务来源、三端版本和测试结果；将未提交改动按 Python、Java、Vue、配置、文档归类。证据：更新 `baseline.md` 与本地只读检查记录。不得丢弃用户改动。
-- [ ] **T002 统一运行目录**｜依赖：T001。决定继续使用旧 `F:\comalesson\runtime\lesoongen` 保存历史任务；在 F Python `.env` 和 F Java 本地启动配置明确 state/artifact/storage roots，并用现有任务验证 JSON、Word、原件可读。证据：脱敏历史 run ID 的查询/下载检查；不移动旧文件。
-- [ ] **T003 Python 来源校验**｜依赖：T001。改进 F 的 `web/scripts/start-web-engine.cmd` 与 Python 启动诊断，显示实际包路径、commit/dirty、配置路径及哈希、Writer/Rewriter 上限、数据根；已有 8001 由别的工程占用时给明确错误。证据：故意保留 PR4 的 C 盘 editable 安装，F 启动仍读 F；错路径注入测试失败得可理解诊断。
-- [ ] **T004 Java 来源校验**｜依赖：T001。F Java 构建写入 build/commit 信息；IDEA 只打开 F `web/pom.xml`；启动前验证数据库连接配置与内部 Token，运行时诊断可证明不是 C 盘旧 Java。证据：停止旧 C 进程后 F 服务的构建 ID、8080 健康检查和数据库连接；不公开密码/绝对路径。
-- [ ] **T005 单一路线启动文档**｜依赖：T002–T004。把 README、`paper4_pipeline/docs/RUN_GUIDE.md`、`web/specs/001.../quickstart.md` 中可能误导的 `python -m`、3306/3307 与 C/旧拷贝路径改成一致的 F 仓库步骤；给已有 MySQL 3306 主线路及 Docker 3307 可选线路，各自有独立环境变量表。证据：另一位开发者按文档从关闭服务状态完成无付费 health 冒烟。
+- [x] **T001 基线冻结**｜依赖：无。记录 HEAD、dirty 文件清单、当前 8001/8080/3306 服务来源、三端版本和测试结果；将未提交改动按 Python、Java、Vue、配置、文档归类。证据：`baseline.md` 第 1–6 节与提交 `a31a093`；用户改动未丢弃。
+- [x] **T002 统一运行目录**｜依赖：T001。继续使用旧 `F:\comalesson\runtime\lesoongen` 保存历史任务；Python/Java 共享同一挂载。证据：`scripts/audit-runtime.py` 对脱敏历史任务验证 JSON、Markdown、Word、manifest、state 与上传原件；不移动旧文件。
+- [x] **T003 Python 来源校验**｜依赖：T001。F 启动诊断显示包路径、commit/dirty、配置哈希、Writer/Rewriter 上限与数据根。证据：PR4 仍保留时 `--check` 指向 F；容器健康报告 `fad6425e7d3e`、`dirty=false` 和配置 SHA256。
+- [x] **T004 Java 来源校验**｜依赖：T001。Java 构建写入来源指纹并暴露非敏感 `/actuator/info`。证据：8080 报告 `fad6425e7d3e`、`dirty=false`、`runtime=container`；Flyway v1–v3 和数据库查询成功。
+- [x] **T005 单一路线启动文档**｜依赖：T002–T004。README、Python Run Guide、Web Quickstart 统一以 F 根目录 `scripts\up.cmd` 为完整产品入口；Docker MySQL 3307 为唯一主线路，本机 3306 只保留旧实例。证据：Windows 本机及 GitHub 干净 Ubuntu runner 均完成无付费四服务 health 冒烟。
 
 **Gate 0A：** 只有 F Python 与 F Java 正在运行；两个健康检查报告正确构建来源；旧数据库及 artifacts 可读。未通过前不再做付费生成实验。
 
 ## Phase 0B · 环境、CI 与 Git（P0）
 
-- [ ] **T006 干净环境重建**｜依赖：Gate 0A。使用 `uv.lock` 在 F 仓库创建专用 `.venv`（不再依赖 Conda PR4），再验证 Dockerfile/Compose 一键启动；锁文件不得包含 C 盘 editable URI。证据：新环境 `paper4_pipeline.__file__` 位于 F、全量离线测试通过，Docker 全栈从干净镜像成功启动；保留 PR4 供历史工程使用，不强制卸载。
-- [ ] **T007 Python CI**｜依赖：T006。GitHub Actions 用固定 Python 版本安装 F 包，跑 pytest、基本静态检查和源码来源断言；明确不读取 `.env`、不请求 DeepSeek。证据：故意失败测试使 PR 检查红灯，正常 PR 输出完整测试报告。
-- [ ] **T008 Java/DB CI**｜依赖：T004。跑 Maven tests，并用 CI MySQL 服务或可用的 Testcontainers 跑迁移/约束测试；Docker 不可用时该 job 应失败或明确单独标记，不能静默算全部通过。证据：全新 DB Flyway 成功和一条故意错误迁移失败用例。
-- [ ] **T009 前端/契约 CI**｜依赖：T007、T008 可并行。跑 Vitest、typecheck、ESLint、Prettier、OpenAPI lint、build 和受控 E2E；保存报告。证据：任一端的破坏性字段变化被契约检查拦截。
-- [ ] **T010 Secrets 与提交整理**｜依赖：T001、T007–T009。检查历史与当前索引中的 Key/Token、个人密码、真实教案、DOCX、运行日志；核对 C 盘旧 Java 中硬编码的默认 Token 是否需轮换；按模块把现有 dirty 改动分小 PR/commit，修订 README。证据：无明文敏感信息的新提交、可回滚的提交序列、CI 通过。任何密钥泄露须先轮换再发布。
+- [x] **T006 干净环境重建**｜依赖：Gate 0A。`uv.lock` 在 F 仓库创建专用 `.venv`，Dockerfile/Compose 可一键启动；锁文件无 C 盘 editable URI。证据：Python 175 项通过，四服务从镜像重建并健康；PR4 保留但不参与运行。
+- [x] **T007 Python CI**｜依赖：T006。GitHub Actions 固定 Python 3.11 与 uv 0.11.16，执行锁定安装、来源断言和 175 项离线测试，不读取真实 `.env`、不调用 DeepSeek。证据：Actions run `35816829870` 的 Python job 成功并上传 JUnit。
+- [x] **T008 Java/DB CI**｜依赖：T004。Maven tests 在 MySQL 8.0.44 Testcontainers 上执行，Docker 缺失不能静默全绿。证据：本机 26 项无跳过；全新 DB Flyway v1–v3、约束失败和故意无效 V4 迁移失败均被测试；Actions run `35816829870` 成功。
+- [x] **T009 前端/契约 CI**｜依赖：T007、T008 可并行。执行 Vitest、typecheck、ESLint、Prettier、OpenAPI lint、build 和 Playwright E2E。证据：6 项单测、7 项 E2E 与 Actions run `35816829870` 的 Vue job 成功。
+- [x] **T010 Secrets 与提交整理**｜依赖：T001、T007–T009。历史与索引未发现 Key/Token/私钥模式，真实教案、DOCX、日志和 `.env` 未跟踪；改动按配置、构建、CI 分提交。证据：本地路径扫描 0 命中；Actions run `35816829870` 的 gitleaks job 成功；工作树干净。
 
-**Gate P0：** 新电脑/干净环境可按唯一文档启动 F；离线 CI 与数据库迁移均有明确绿灯；仓库不依赖 C 盘。P0 完成前，不将 P1/P2 改动合入主分支。
+**Gate P0：通过（2026-09-23）。** 新电脑/干净环境可按唯一文档启动 F；离线 CI、真实 MySQL 迁移与 Docker 四服务冒烟均为绿灯；运行来源指纹证明仓库不依赖 C 盘。P1/P2 从下一独立变更开始，不与本 Gate 混合。
 
 ## Phase 1A · 行为基线与生成初审（P1）
 
