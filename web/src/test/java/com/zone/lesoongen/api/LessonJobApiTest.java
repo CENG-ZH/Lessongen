@@ -89,4 +89,13 @@ class LessonJobApiTest {
                 .andExpect(status().isUnsupportedMediaType())
                 .andExpect(jsonPath("$.code").value("INVALID_DOCX"));
     }
+
+    @Test
+    void actuatorInfoExposesNonSecretBuildFingerprint() throws Exception {
+        mvc.perform(get("/actuator/info"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lessongen.build-commit").exists())
+                .andExpect(jsonPath("$.lessongen.build-dirty").exists())
+                .andExpect(jsonPath("$.lessongen.runtime").exists());
+    }
 }

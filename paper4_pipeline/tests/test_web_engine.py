@@ -716,6 +716,17 @@ class EngineApiContractTests(unittest.TestCase):
         self.assertEqual("官能团与有机物性质", request.task.topic)
         self.assertEqual("01J00000000000000000000000", accepted.external_job_id)
 
+    def test_health_exposes_non_secret_build_fingerprint(self) -> None:
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "unit-test-key"}):
+            response = self.client.get("/internal/v1/health")
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertEqual("up", payload["status"])
+        self.assertRegex(payload["build_commit"], r"^(unknown|[0-9a-f]{7,12})$")
+        self.assertIn(payload["build_dirty"], {"true", "false", "unknown"})
+        self.assertEqual(64, len(payload["config_sha256"]))
+        self.assertNotIn("unit-test-key", response.text)
+
     def test_generate_requires_internal_token_and_returns_202(self) -> None:
         denied = self.client.post(
             "/internal/v1/runs/generate", json=request_payload()

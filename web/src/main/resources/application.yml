@@ -29,6 +29,15 @@ management:
     web:
       exposure:
         include: health,info
+  info:
+    env:
+      enabled: true
+
+info:
+  lessongen:
+    build-commit: ${LESSONGEN_BUILD_COMMIT:unknown}
+    build-dirty: ${LESSONGEN_BUILD_DIRTY:unknown}
+    runtime: ${LESSONGEN_RUNTIME_KIND:local}
 
 app:
   engine-base-url: ${ENGINE_BASE_URL:http://127.0.0.1:8001}

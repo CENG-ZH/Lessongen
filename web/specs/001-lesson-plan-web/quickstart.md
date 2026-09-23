@@ -19,7 +19,7 @@ docker compose logs --tail=100 engine backend
 scripts\down.cmd
 ```
 
-`down.cmd` 仅停止容器，不删除 MySQL 卷和运行数据。Docker 路线的上传件与产物在仓库 `runtime/`，数据库在 Docker 命名卷，均与旧 C/F 历史实例隔离。切勿用 `down -v` 或直接删卷来处理启动故障。MySQL 主机端口为 3307，后端为 8080；引擎 8001 不映射到主机。若 5173/8080/3307 被旧服务占用，请先确认来源并停止旧服务，不要盲目关闭进程。
+`down.cmd` 仅停止容器，不删除 MySQL 卷和运行数据。Python 与 Java 共同挂载 `.env` 中的 `LESSONGEN_RUNTIME_ROOT`；本机已有 `F:\comalesson\runtime\lesoongen` 时会继续读取该目录的历史上传件、JSON 和 Word，新安装才使用仓库 `runtime/lesoongen`。数据库在 Docker 命名卷。切勿用 `down -v` 或直接删卷来处理启动故障。MySQL 主机端口为 3307，后端为 8080；引擎 8001 不映射到主机。若 5173/8080/3307 被旧服务占用，请先确认来源并停止旧服务，不要盲目关闭进程。
 
 仓库内旧 `web/compose.yaml` 只提供 MySQL，不要与根目录的全栈 `compose.yaml` 同时启动；两者都使用主机 3307，且数据库卷不同。
 
@@ -69,3 +69,10 @@ npm run build
 ```
 
 本机 Docker 未启动时，Java Testcontainers 迁移测试会跳过；CI 要求该测试真实执行。以上测试不调用 DeepSeek。真实生成/优化前，请确认输入材料授权与账户余额。
+
+历史文件只读验收：
+
+```bat
+cd /d F:\comalesson\Lessongen
+paper4_pipeline\.venv\Scripts\python.exe scripts\audit-runtime.py F:\comalesson\runtime\lesoongen
+```

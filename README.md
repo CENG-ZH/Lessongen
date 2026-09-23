@@ -97,7 +97,7 @@ scripts\up.cmd
 
 前提仅需 Docker Desktop。首次运行会在仓库根目录创建被 Git 忽略的 `.env`：若已有 `paper4_pipeline/.env`，会复用其中的 DeepSeek Key 和内部 Token；否则只会在终端隐藏式询问 Key，其余密码自动生成。它不会打印密钥。此命令构建并启动 MySQL、Python 引擎、Spring Boot 和前端，等待服务启动后访问 `http://127.0.0.1:5173`。生成/优化教案会调用付费模型，启动与健康检查不会。关闭时运行 `scripts\down.cmd`，不会删除数据库卷或教案文件。
 
-Docker 数据独立保存在 `runtime/engine/`、`runtime/web/` 和 Docker 命名卷中，不会自动迁移旧的 C/F 历史任务。MySQL 映射主机 `3307`，Java 映射 `8080`；引擎 `8001` 仅供容器内部访问。若旧进程占用这些端口，先确认进程来源并停止旧服务，再运行启动命令。不要对已有数据库卷随意更换 `.env` 中的 DB 密码。
+Python 与 Java 共享 `.env` 中的 `LESSONGEN_RUNTIME_ROOT`。本机若已存在保留目录 `F:\comalesson\runtime\lesoongen`，初始化脚本会继续使用它，因此旧 JSON、Word、上传原件和引擎状态不会被复制或覆盖；新安装默认使用 `runtime/lesoongen/`。MySQL 数据保存在 Docker 命名卷。MySQL 映射主机 `3307`，Java 映射 `8080`；引擎 `8001` 仅供容器内部访问。若旧进程占用这些端口，先确认来源并停止旧服务。不要对已有数据库卷随意更换 `.env` 中的 DB 密码。
 
 ### 不使用 Docker 的 Python 开发
 
@@ -144,16 +144,22 @@ npm run lint
 npm run build
 ```
 
-GitHub Actions 对 Python 锁文件、Java/MySQL 迁移、Vue 静态与 E2E、Docker 镜像构建及密钥泄露进行检查。自动测试不会调用付费模型；本机若未启动 Docker，Java 的 Testcontainers 迁移测试会跳过，CI 会把这种跳过判为失败。
+GitHub Actions 对 Python 锁文件、Java/MySQL 迁移、Vue 静态与 E2E、Docker 四服务完整启动冒烟及密钥泄露进行检查。自动测试不会调用付费模型；本机若未启动 Docker，Java 的 Testcontainers 迁移测试会跳过，CI 会把这种跳过判为失败。
+
+历史运行目录可用只读命令验收；命令不会打印教案正文或密钥：
+
+```bat
+paper4_pipeline\.venv\Scripts\python.exe scripts\audit-runtime.py F:\comalesson\runtime\lesoongen
+```
 
 ## 运行数据
 
-一键 Docker 路线的数据写入被 Git 忽略的目录与 Docker 命名卷：
+一键 Docker 路线的数据写入 `LESSONGEN_RUNTIME_ROOT` 与 Docker 命名卷。当前机器会保留使用：
 
 ```text
-runtime/engine/engine-state/
-runtime/engine/engine-artifacts/
-runtime/web/web-storage/
+F:\comalesson\runtime\lesoongen\engine-state\
+F:\comalesson\runtime\lesoongen\engine-artifacts\
+F:\comalesson\runtime\lesoongen\web-storage\
 Docker 卷 lessongen_mysql_data
 ```
 

@@ -110,19 +110,35 @@ jobs:
           if-no-files-found: ignore
 
   docker:
-    name: Build one-click stack
+    name: Start and smoke-test one-click stack
     runs-on: ubuntu-24.04
     env:
       DEEPSEEK_API_KEY: ci-placeholder
       ENGINE_INTERNAL_TOKEN: ci-placeholder
       DB_PASSWORD: ci-placeholder
       MYSQL_ROOT_PASSWORD: ci-placeholder
+      LESSONGEN_RUNTIME_ROOT: ./runtime/ci-lessongen
+      LESSONGEN_BUILD_COMMIT: ${{ github.sha }}
+      LESSONGEN_BUILD_DIRTY: 'false'
     steps:
       - uses: actions/checkout@v7
       - name: Validate Compose without real credentials
         run: docker compose -f compose.yaml config --quiet
-      - name: Build all application images
-        run: docker compose -f compose.yaml build engine backend frontend
+      - name: Start all services from clean images
+        run: docker compose -f compose.yaml up --build -d --wait --wait-timeout 240
+      - name: Verify health and build provenance
+        run: |
+          docker compose -f compose.yaml ps
+          curl --fail --silent http://127.0.0.1:8080/actuator/health | grep -q '"status":"UP"'
+          curl --fail --silent http://127.0.0.1:8080/actuator/info | grep -q "${GITHUB_SHA}"
+          curl --fail --silent http://127.0.0.1:5173/ >/dev/null
+          docker compose -f compose.yaml exec -T engine python -c "import json, os, urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8001/internal/v1/health')); assert data['status']=='up'; assert data['build_commit']==os.environ['LESSONGEN_BUILD_COMMIT']; assert data['config_sha256']"
+      - name: Save container logs
+        if: failure()
+        run: docker compose -f compose.yaml logs --no-color --tail=300
+      - name: Stop the ephemeral CI stack
+        if: always()
+        run: docker compose -f compose.yaml down -v --remove-orphans
 
   secrets:
     name: Secret scan

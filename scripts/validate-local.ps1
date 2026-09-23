@@ -23,4 +23,14 @@ foreach ($name in @('DEEPSEEK_API_KEY', 'ENGINE_INTERNAL_TOKEN', 'DB_PASSWORD', 
     }
 }
 
-Write-Host 'Repository .env contains the four required settings; values were not displayed.'
+$runtimeRoot = [string]$values['LESSONGEN_RUNTIME_ROOT']
+if (-not $runtimeRoot) {
+    throw 'Repository .env has no LESSONGEN_RUNTIME_ROOT. Run scripts\setup-local.ps1 once.'
+}
+foreach ($name in @('PAPER4_WEB_STATE_ROOT', 'PAPER4_ARTIFACTS_ROOT', 'LESSON_STORAGE_ROOT')) {
+    if (-not [string]$values[$name]) {
+        throw "Repository .env has no $name. Run scripts\setup-local.ps1 once."
+    }
+}
+
+Write-Host 'Repository .env contains the required settings and runtime root; values were not displayed.'

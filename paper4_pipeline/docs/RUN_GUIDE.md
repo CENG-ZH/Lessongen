@@ -90,10 +90,15 @@ curl http://127.0.0.1:8001/internal/v1/health
 ## 8. 离线检查历史结果
 
 ```bat
-.venv\Scripts\python.exe -m paper4_pipeline.cli inspect --result ".\var\engine-artifacts\<run_id>\run_result.json"
-.venv\Scripts\python.exe -m paper4_pipeline.cli export-process --run-dir ".\var\engine-artifacts\<run_id>"
-.venv\Scripts\python.exe -m paper4_pipeline.cli analyze --artifacts ".\var\engine-artifacts"
+cd /d F:\comalesson\Lessongen
+paper4_pipeline\.venv\Scripts\python.exe scripts\audit-runtime.py F:\comalesson\runtime\lesoongen
+cd paper4_pipeline
+.venv\Scripts\python.exe -m paper4_pipeline.cli inspect --result "F:\comalesson\runtime\lesoongen\engine-artifacts\<run_id>\run_result.json"
+.venv\Scripts\python.exe -m paper4_pipeline.cli export-process --run-dir "F:\comalesson\runtime\lesoongen\engine-artifacts\<run_id>"
+.venv\Scripts\python.exe -m paper4_pipeline.cli analyze --artifacts "F:\comalesson\runtime\lesoongen\engine-artifacts"
 ```
+
+`audit-runtime.py` 是只读验收：检查代表性的历史 JSON、Markdown、Word 包、manifest 哈希、引擎状态和上传原件，但不打印正文。新电脑没有历史目录时，把参数换成 `.env` 中的 `LESSONGEN_RUNTIME_ROOT`。
 
 ## 9. 常见问题
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import subprocess
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,6 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
+from paper4_pipeline import __version__
 from paper4_pipeline.providers.openai_compatible import OpenAICompatibleProvider
 from paper4_pipeline.web_api.manager import EngineManager
 from paper4_pipeline.web_api.projection import EngineProjection
@@ -34,7 +37,29 @@ from paper4_pipeline.web_api.schemas import (
     RunAccepted,
     RunSnapshot,
 )
-from paper4_pipeline.web_api.settings import EngineSettings
+from paper4_pipeline.web_api.settings import EngineSettings, PROJECT_ROOT
+
+
+def _build_fingerprint() -> tuple[str, str]:
+    commit = os.getenv("LESSONGEN_BUILD_COMMIT", "").strip()
+    dirty = os.getenv("LESSONGEN_BUILD_DIRTY", "").strip()
+    if commit and commit != "unknown" and dirty:
+        return commit, dirty
+    try:
+        repo = PROJECT_ROOT.parent
+        commit = subprocess.check_output(
+            ["git", "-C", str(repo), "rev-parse", "--short=12", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        status = subprocess.check_output(
+            ["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=normal"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        return commit or "unknown", str(bool(status.strip())).lower()
+    except (OSError, subprocess.SubprocessError):
+        return commit or "unknown", dirty or "unknown"
 
 
 def create_app(
@@ -44,6 +69,7 @@ def create_app(
     effective = settings or EngineSettings.from_environment()
     coordinator = manager or EngineManager(effective)
     projection = EngineProjection(effective)
+    build_commit, build_dirty = _build_fingerprint()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -115,11 +141,20 @@ def create_app(
     @app.get("/internal/v1/health")
     def health() -> dict[str, object]:
         OpenAICompatibleProvider.load_environment()
+        config_sha256 = (
+            hashlib.sha256(effective.config_path.read_bytes()).hexdigest()
+            if effective.config_path.is_file()
+            else None
+        )
         return {
             "status": "up",
             "worker_ready": coordinator._executor is not None,
             "model_configured": bool(os.getenv("DEEPSEEK_API_KEY", "").strip()),
             "config_present": effective.config_path.is_file(),
+            "config_sha256": config_sha256,
+            "build_commit": build_commit,
+            "build_dirty": build_dirty,
+            "package_version": __version__,
         }
 
     @app.post(

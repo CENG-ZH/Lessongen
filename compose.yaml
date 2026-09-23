@@ -21,7 +21,11 @@ services:
       retries: 24
 
   engine:
-    build: ./paper4_pipeline
+    build:
+      context: ./paper4_pipeline
+      args:
+        LESSONGEN_BUILD_COMMIT: ${LESSONGEN_BUILD_COMMIT:-unknown}
+        LESSONGEN_BUILD_DIRTY: ${LESSONGEN_BUILD_DIRTY:-unknown}
     environment:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Run scripts/up.cmd to create .env}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
@@ -31,7 +35,7 @@ services:
       PAPER4_WEB_STATE_ROOT: /data/engine-state
       PAPER4_ARTIFACTS_ROOT: /data/engine-artifacts
     volumes:
-      - ./runtime/engine:/data
+      - ${LESSONGEN_RUNTIME_ROOT:-./runtime/lessongen}:/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/internal/v1/health', timeout=3)"]
       interval: 5s
@@ -39,7 +43,11 @@ services:
       retries: 24
 
   backend:
-    build: ./web
+    build:
+      context: ./web
+      args:
+        LESSONGEN_BUILD_COMMIT: ${LESSONGEN_BUILD_COMMIT:-unknown}
+        LESSONGEN_BUILD_DIRTY: ${LESSONGEN_BUILD_DIRTY:-unknown}
     environment:
       DB_URL: jdbc:mysql://mysql:3306/lesoongen?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC
       DB_USERNAME: lesoongen
@@ -49,7 +57,7 @@ services:
       LESSON_STORAGE_ROOT: /data/web-storage
       FRONTEND_ORIGIN: http://127.0.0.1:5173
     volumes:
-      - ./runtime/web:/data
+      - ${LESSONGEN_RUNTIME_ROOT:-./runtime/lessongen}:/data
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -57,13 +65,24 @@ services:
         condition: service_healthy
       engine:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /actuator/health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3; grep -q '200' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
 
   frontend:
     build: ./web/frontend
     ports:
       - "127.0.0.1:5173:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
 
 volumes:
   mysql_data:
