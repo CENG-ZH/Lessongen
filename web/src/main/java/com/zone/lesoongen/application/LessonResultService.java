@@ -55,7 +55,7 @@ public class LessonResultService {
             return new LessonResponses.LessonResult(jobId, job.getStatus(), result.stopReason(),
                     result.bestVersionId(), result.lastVersionId(), result.bestLessonPlan(),
                     publicScores(result.rubricScores()), result.overallScore(),
-                    "内部质量信号，不代表正式教学效果评价", result.optimization(), changes,
+                    "内部质量信号，不代表正式教学效果评价", result.optimization(), result.review(), changes,
                     safe(result.unresolvedIssues()), safe(result.parseWarnings()));
         } catch (IOException error) {
             throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "RESULT_READ_FAILED",

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import httpx
@@ -29,6 +31,7 @@ from paper4_pipeline.providers.openai_compatible import (
     OpenAICompatibleProvider,
     ProviderInvocationError,
 )
+from paper4_pipeline.observability.call_ledger import activate_call_ledger
 
 
 class _RetryPayload(BaseModel):
@@ -313,12 +316,23 @@ class LiveConfigurationTests(unittest.TestCase):
         client = _FakeJsonClient()
         provider._client = client  # type: ignore[assignment]
 
-        result = provider.invoke_structured(
-            prompt=load_prompt("validator_prompt"),
-            input_payload={"fixture": True},
-            output_schema=_RetryPayload,
-            stage="unit_retry",
-        )
+        with tempfile.TemporaryDirectory() as directory:
+            with activate_call_ledger(Path(directory) / "attempts.jsonl") as ledger:
+                result = provider.invoke_structured(
+                    prompt=load_prompt("validator_prompt"),
+                    input_payload={"fixture": True},
+                    output_schema=_RetryPayload,
+                    stage="unit_retry",
+                )
+            self.assertEqual(["invalid_output", "ok"], [item.status for item in ledger.records])
+            self.assertEqual(20, sum(item.input_tokens or 0 for item in ledger.records))
+            self.assertEqual(10, sum(item.output_tokens or 0 for item in ledger.records))
+            self.assertEqual(2, len({item.attempt_id for item in ledger.records}))
+            self.assertEqual(1, len({item.call_id for item in ledger.records}))
+            self.assertEqual("provider_response", ledger.records[0].usage_source)
+            self.assertEqual(result.usage.input_tokens, sum(item.input_tokens or 0 for item in ledger.records))
+            self.assertEqual(result.usage.output_tokens, sum(item.output_tokens or 0 for item in ledger.records))
+            self.assertAlmostEqual(result.estimated_cost, sum(item.estimated_cost or 0 for item in ledger.records))
 
         self.assertEqual(1, result.value.value)
         self.assertEqual(2, result.metadata.attempts)
@@ -334,30 +348,105 @@ class LiveConfigurationTests(unittest.TestCase):
         client = _PaymentRequiredClient()
         provider._client = client  # type: ignore[assignment]
 
-        with self.assertRaises(ProviderInvocationError) as raised:
-            provider.invoke_structured(
-                prompt=load_prompt("validator_prompt"),
-                input_payload={"fixture": True},
-                output_schema=_RetryPayload,
-                stage="unit_payment_required",
-            )
+        with tempfile.TemporaryDirectory() as directory:
+            with activate_call_ledger(Path(directory) / "attempts.jsonl") as ledger:
+                with self.assertRaises(ProviderInvocationError) as raised:
+                    provider.invoke_structured(
+                        prompt=load_prompt("validator_prompt"),
+                        input_payload={"fixture": True},
+                        output_schema=_RetryPayload,
+                        stage="unit_payment_required",
+                    )
+            self.assertEqual(1, len(ledger.records))
+            self.assertEqual("failed", ledger.records[0].status)
+            self.assertIsNone(ledger.records[0].input_tokens)
+            self.assertIsNone(ledger.records[0].estimated_cost)
 
         self.assertEqual(1, raised.exception.attempts)
         self.assertEqual(1, client.calls)
         self.assertIn("Insufficient Balance", str(raised.exception))
+
+    def test_success_without_provider_usage_records_unknown_not_zero(self) -> None:
+        provider = OpenAICompatibleProvider(ModelConfig(max_retries=1))
+        client = _FakeJsonClient()
+        message = _FakeMessage('{"value": 1}')
+        message.usage_metadata = {}
+        client.responses = iter([message])
+        provider._client = client  # type: ignore[assignment]
+        with tempfile.TemporaryDirectory() as directory:
+            with activate_call_ledger(Path(directory) / "attempts.jsonl") as ledger:
+                result = provider.invoke_structured(
+                    prompt=load_prompt("validator_prompt"),
+                    input_payload={"fixture": True},
+                    output_schema=_RetryPayload,
+                    stage="unit_unknown_usage",
+                )
+        self.assertEqual(1, result.value.value)
+        self.assertEqual(1, len(ledger.records))
+        self.assertIsNone(ledger.records[0].input_tokens)
+        self.assertIsNone(ledger.records[0].estimated_cost)
+        self.assertEqual("unknown", ledger.records[0].usage_source)
+
+    def test_ledger_write_failure_never_retries_a_paid_call(self) -> None:
+        provider = OpenAICompatibleProvider(ModelConfig(max_retries=2))
+        client = _FakeJsonClient()
+        client.responses = iter([_FakeMessage('{"value": 1}')])
+        provider._client = client  # type: ignore[assignment]
+        with tempfile.TemporaryDirectory() as directory:
+            with activate_call_ledger(Path(directory) / "attempts.jsonl") as ledger:
+                with patch.object(ledger, "append", side_effect=OSError("disk full")):
+                    with self.assertRaisesRegex(
+                        ProviderInvocationError, "accounting could not be persisted"
+                    ) as raised:
+                        provider.invoke_structured(
+                            prompt=load_prompt("validator_prompt"),
+                            input_payload={"fixture": True},
+                            output_schema=_RetryPayload,
+                            stage="unit_ledger_failure",
+                        )
+        self.assertEqual(1, len(client.calls))
+        self.assertEqual(1, raised.exception.attempts)
+        self.assertEqual(10, raised.exception.usage.input_tokens)
+
+    def test_graceful_cancellation_records_unknown_attempt_without_retry(self) -> None:
+        provider = OpenAICompatibleProvider(ModelConfig(max_retries=2))
+        client = _PaymentRequiredClient()
+        client.invoke = Mock(side_effect=KeyboardInterrupt())
+        provider._client = client  # type: ignore[assignment]
+        with tempfile.TemporaryDirectory() as directory:
+            with activate_call_ledger(Path(directory) / "attempts.jsonl") as ledger:
+                with self.assertRaises(KeyboardInterrupt):
+                    provider.invoke_structured(
+                        prompt=load_prompt("validator_prompt"),
+                        input_payload={"fixture": True},
+                        output_schema=_RetryPayload,
+                        stage="unit_cancelled",
+                    )
+        self.assertEqual(1, client.invoke.call_count)
+        self.assertEqual(1, len(ledger.records))
+        self.assertEqual("cancelled", ledger.records[0].status)
+        self.assertIsNone(ledger.records[0].input_tokens)
 
     def test_rewriter_output_cap_stops_and_counts_paid_tokens(self) -> None:
         provider = OpenAICompatibleProvider(ModelConfig(max_retries=2))
         client = _LengthLimitedClient()
         provider._client = client  # type: ignore[assignment]
 
-        with self.assertRaises(ProviderInvocationError) as raised:
-            provider.invoke_structured(
-                prompt=load_prompt("rewrite_patch_prompt"),
-                input_payload={"fixture": True},
-                output_schema=_RetryPayload,
-                stage="rewrite_patch",
-            )
+        with tempfile.TemporaryDirectory() as directory:
+            with activate_call_ledger(Path(directory) / "attempts.jsonl") as ledger:
+                with self.assertRaises(ProviderInvocationError) as raised:
+                    provider.invoke_structured(
+                        prompt=load_prompt("rewrite_patch_prompt"),
+                        input_payload={"fixture": True},
+                        output_schema=_RetryPayload,
+                        stage="rewrite_patch",
+                    )
+            self.assertEqual(1, len(ledger.records))
+            self.assertEqual("truncated", ledger.records[0].status)
+            self.assertEqual("truncation_exception", ledger.records[0].usage_source)
+            self.assertEqual(8192, ledger.records[0].output_tokens)
+            self.assertEqual(raised.exception.usage.input_tokens, ledger.records[0].input_tokens)
+            self.assertAlmostEqual(raised.exception.estimated_cost, ledger.records[0].estimated_cost)
 
         self.assertEqual(1, client.calls)
         self.assertEqual(1, raised.exception.attempts)

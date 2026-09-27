@@ -105,6 +105,10 @@ def route_after_evaluation(
         config.optimization_max_rounds if task_mode == TaskMode.OPTIMIZE
         else config.max_rounds
     )
+    # A review of v0 does not consume a rewrite round. Even max_rounds=0
+    # must permit the promised initial independent review when affordable.
+    if require_initial_review:
+        max_rounds_hit = False
     # Separate resources already consumed from capacity needed only by a future
     # review cycle. Once max_rounds has independently ended the run, that future
     # cycle cannot happen, so its retry reserve must not masquerade as an
@@ -157,12 +161,15 @@ def route_after_validation(
     estimated_cost: float,
     required_next_model_calls: int = 2,
     elapsed_seconds: float = 0.0,
+    max_rounds_hit: bool = False,
 ) -> RouteDecision:
     accepted = [item for item in critiques.items if item.status.value == "accepted"]
     reasons: list[StopReason] = []
     if not accepted:
         reasons.append(StopReason.NO_ACTIONABLE_FEEDBACK)
-    if (
+    if max_rounds_hit and accepted:
+        reasons.append(StopReason.MAX_ROUNDS)
+    if not max_rounds_hit and (
         model_call_count + required_next_model_calls > config.max_model_calls
         or token_usage.total_tokens >= config.max_total_tokens
         or estimated_cost >= config.max_estimated_cost

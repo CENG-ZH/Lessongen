@@ -43,6 +43,8 @@ Lessongen 已具备真实模型生成/优化、结构化教案、审查裁决、
 
 **P1-01 生成初稿的审查语义。** 默认生成模式在 `v0` 通过内部 Judge 时，仍至少完成一次 Subject、Pedagogy、Alignment 独立审查与 Validator 裁决；随后才能宣称“完成独立审查”。内部高分不能单独作为跳过 Critic 的理由。无可执行意见不强制改写；有有效意见则按现有 Rewrite/Verifier/复评处理。优化模式保持其既有初审要求。
 
+P1 已冻结的工程语义：默认策略 ID 为 `at_least_one_independent_review`，仅显式设置 `judge_first_fast_path` 才允许旧路线；“已完成独立审查”要求同一轮三位配置的 Critic 都有完成事件，且该轮存在 Validator 裁决。无可执行意见沿用 `no_actionable_feedback`，保留 v0、不虚构 v1；初审预算不足为 `needs_human` + `budget_exceeded`；已审查但无改写轮次且有接受意见为 `needs_human` + `max_rounds`。Critic 失败不得宣称审查完成。该默认值的研究成本取舍仍需导师确认，见 D04–D06。
+
 验收：回放“v0=8.275、门槛=8.0”的固定状态，能看到三 Critic 与 Validator；可由配置显式选择旧的 `judge_first_fast_path` 作为实验对照，但产物与 UI 必须准确区分“仅内部评分”和“完成独立审查”。预算不足、Critic 失败和无可执行意见各有明确状态/停止原因，不伪造修改。
 
 **P1-02 图模块化且行为兼容。** 将 `orchestration/graph.py` 的节点逻辑、路由/状态转换、trace/用量记录分开，但保留 `Paper4Workflow` 公共入口、现有 `LessonTask`/`PipelineResult` 与导出语义。先写 characterization tests，再按节点小步移动，避免“大重构 + 算法改动”同时发生。
@@ -50,6 +52,8 @@ Lessongen 已具备真实模型生成/优化、结构化教案、审查裁决、
 验收：固定输入和假 Agent 的节点顺序、状态迁移、失败降级、最佳版本选择及关键 trace 字段不变；格式调整须显式升版本并提供兼容读取。真实模型措辞不作为逐字比较基准。
 
 **P1-03 统一模型调用账本。** 设计师、Writer、Critic、Validator、Rewriter、Judge 与 DOCX Normalizer 共用调用记录规范，覆盖成功、重试、截断、网络失败、取消和部分完成。每次真实尝试只计一次；成本是按冻结费率估算，不伪称账单金额。
+
+本轮实现以每次 Provider 尝试为一条追加记录；上游未返回 usage 时 Token 和费用为 `null`（已知金额只是部分和），截断可从异常携带的 usage 恢复。账本写入失败立即终止，不因本地磁盘错误再次调用付费模型。进程被操作系统强制杀死时无法保证最后一条记录落盘，不能把它解释为零费用；恢复与账单核对应在后续运维设计中处理。
 
 验收：trace、`run_result`、Web 快照的总调用/Token/估算费用可对账；异常路径不归零、不重复计数；记录模型 ID、角色、阶段、Prompt/config 指纹和完成原因，但不记录密钥或未授权的教案全文。
 

@@ -3,7 +3,7 @@ import { ref } from "vue";
 const model = defineModel<string[]>({ default: () => [] });
 withDefaults(defineProps<{ placeholder?: string; ariaLabel?: string }>(), {
   placeholder: "输入后按回车",
-  ariaLabel: "添加条目",
+  ariaLabel: "条目",
 });
 const input = ref("");
 function add() {
@@ -15,6 +15,7 @@ function add() {
 function remove(index: number) {
   model.value = model.value.filter((_, item) => item !== index);
 }
+defineExpose({ commitPending: add });
 </script>
 <template>
   <div class="chip-editor">
@@ -27,7 +28,7 @@ function remove(index: number) {
         {{ item
         }}<button
           type="button"
-          :aria-label="`删除 ${item}`"
+          :aria-label="`删除${ariaLabel}：${item}`"
           @click="remove(index)"
         >
           ×
@@ -40,8 +41,11 @@ function remove(index: number) {
         :placeholder="placeholder"
         :aria-label="ariaLabel"
         @keydown.enter.prevent="add"
+        @blur="add"
       />
-      <button type="button" @click="add">添加</button>
+      <button type="button" :aria-label="`添加${ariaLabel}`" @click="add">
+        添加
+      </button>
     </div>
   </div>
 </template>

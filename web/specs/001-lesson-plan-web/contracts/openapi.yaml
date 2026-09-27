@@ -483,6 +483,11 @@ components:
           anyOf:
             - { $ref: '#/components/schemas/OptimizationSummary' }
             - { type: 'null' }
+        review:
+          description: 可选的独立审查证据；旧任务可能没有该字段。
+          anyOf:
+            - { $ref: '#/components/schemas/ReviewSummary' }
+            - { type: 'null' }
         changes:
           type: array
           items: { $ref: '#/components/schemas/ChangeSummary' }
@@ -492,6 +497,19 @@ components:
         parseWarnings:
           type: array
           items: { type: string }
+
+    ReviewSummary:
+      type: object
+      additionalProperties: false
+      required: [policy, reviewed_roles, validator_completed, independent_review_complete, content_changed]
+      properties:
+        policy: { type: string }
+        reviewed_roles:
+          type: array
+          items: { type: string }
+        validator_completed: { type: boolean }
+        independent_review_complete: { type: boolean }
+        content_changed: { type: boolean }
 
     OptimizationSummary:
       type: object

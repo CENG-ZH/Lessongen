@@ -161,9 +161,14 @@ def execute_optimize(
             artifacts_root=settings.artifacts_root,
         )
         if normalized is None:
-            normalized = DocxNormalizer(config).normalize(
-                raw, task_input, task_id=record.task_id, plan_id=plan_id,
-            )
+            from paper4_pipeline.observability.call_ledger import activate_call_ledger
+
+            with activate_call_ledger(
+                registry.run_dir(engine_run_id) / "normalized" / "model_call_ledger.jsonl"
+            ):
+                normalized = DocxNormalizer(config).normalize(
+                    raw, task_input, task_id=record.task_id, plan_id=plan_id,
+                )
         atomic_write_text(
             registry.run_dir(engine_run_id)
             / "normalized"

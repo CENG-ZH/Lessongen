@@ -81,7 +81,7 @@ class ArtifactIngestionServiceTest {
     private static EngineContracts.Result result() {
         return new EngineContracts.Result("run-001", "01J00000000000000000000000",
                 "completed", "quality_passed", "v1", "v1",
-                new ObjectMapper().createObjectNode(), Map.of(), 8.0, null,
+                new ObjectMapper().createObjectNode(), Map.of(), 8.0, null, null,
                 List.of(), List.of(), List.of(), List.of());
     }
 

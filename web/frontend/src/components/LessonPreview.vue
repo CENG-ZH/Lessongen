@@ -2,8 +2,18 @@
 import { computed } from "vue";
 const props = defineProps<{ plan: Record<string, any> }>();
 const metadata = computed(() => props.plan.metadata || {});
+const duration = computed(() => {
+  const value = metadata.value.duration_minutes;
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? `${value} 分钟`
+    : "课时待确认";
+});
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 const list = (value: unknown) => (Array.isArray(value) ? value : []);
+const minutes = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value) && value > 0
+    ? `${value} 分钟`
+    : "时长待确认";
 </script>
 <template>
   <article class="lesson-paper">
@@ -13,9 +23,8 @@ const list = (value: unknown) => (Array.isArray(value) ? value : []);
       >
       <h1>{{ metadata.topic || "教案" }}</h1>
       <p>
-        {{ metadata.duration_minutes || 45 }} 分钟<span
-          v-if="metadata.textbook_version"
-        >
+        {{ duration
+        }}<span v-if="metadata.textbook_version">
           · {{ metadata.textbook_version }}</span
         >
       </p>
@@ -92,8 +101,9 @@ const list = (value: unknown) => (Array.isArray(value) ? value : []);
         <h2>教学过程</h2>
         <div class="procedure-table" role="table" aria-label="教学过程">
           <div class="procedure-head" role="row">
-            <strong>环节 / 时间</strong><strong>教师活动与材料</strong
-            ><strong>学生活动与证据</strong>
+            <strong role="columnheader">环节 / 时间</strong
+            ><strong role="columnheader">教师活动与材料</strong
+            ><strong role="columnheader">学生活动与证据</strong>
           </div>
           <div
             v-for="step in list(plan.procedure_steps)"
@@ -101,11 +111,12 @@ const list = (value: unknown) => (Array.isArray(value) ? value : []);
             class="procedure-row"
             role="row"
           >
-            <div>
+            <div role="cell">
               <strong>{{ step.stage }}</strong
-              ><span>{{ step.duration_minutes }} 分钟</span>
+              ><span>{{ minutes(step.duration_minutes) }}</span>
             </div>
-            <div>
+            <div role="cell">
+              <span class="cell-heading">教师活动与材料</span>
               <ul>
                 <li v-for="item in list(step.teacher_actions)" :key="item">
                   {{ item }}
@@ -115,7 +126,8 @@ const list = (value: unknown) => (Array.isArray(value) ? value : []);
                 <b>关键问题：</b>{{ step.questions[0].question }}
               </p>
             </div>
-            <div>
+            <div role="cell">
+              <span class="cell-heading">学生活动与证据</span>
               <ul>
                 <li v-for="item in list(step.student_actions)" :key="item">
                   {{ item }}

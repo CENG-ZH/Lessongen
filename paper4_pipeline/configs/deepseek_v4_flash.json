@@ -1,8 +1,9 @@
 {
   "schema_version": "paper4-experiment-v0.1",
-  "experiment_id": "paper4_deepseek_v4_flash_three_critic_v1_6",
-  "method_id": "design_architect_writer_three_critic_validator_rewriter_v1_6",
+  "experiment_id": "paper4_deepseek_v4_flash_three_critic_p1_reviewed",
+  "method_id": "design_architect_writer_three_critic_validator_rewriter_p1_reviewed",
   "execution_mode": "live",
+  "generation_review_policy": "at_least_one_independent_review",
   "random_seed": 20260903,
   "designer_profile_id": "design_architect_v0_1",
   "writer_profile_id": "writer_v0_1",

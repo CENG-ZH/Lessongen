@@ -130,6 +130,7 @@ public final class EngineContracts {
             @JsonProperty("rubric_scores") Map<String, Double> rubricScores,
             @JsonProperty("overall_score") Double overallScore,
             JsonNode optimization,
+            JsonNode review,
             @JsonProperty("implemented_changes") List<Change> implementedChanges,
             @JsonProperty("unresolved_issues") List<String> unresolvedIssues,
             @JsonProperty("parse_warnings") List<String> parseWarnings,

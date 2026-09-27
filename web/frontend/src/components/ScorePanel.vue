@@ -1,24 +1,18 @@
 <script setup lang="ts">
 import {
   computed,
-  nextTick,
+  defineAsyncComponent,
+  defineComponent,
+  h,
   onBeforeUnmount,
   onMounted,
   ref,
-  watch,
 } from "vue";
-import * as echarts from "echarts/core";
-import { RadarChart } from "echarts/charts";
-import { CanvasRenderer } from "echarts/renderers";
-import { LegendComponent, TooltipComponent } from "echarts/components";
-echarts.use([RadarChart, CanvasRenderer, LegendComponent, TooltipComponent]);
 
 const props = defineProps<{
   scores: Record<string, number>;
   overall?: number | null;
 }>();
-const chart = ref<HTMLDivElement>();
-let instance: echarts.ECharts | undefined;
 const labels: Record<string, string> = {
   curriculumAlignment: "课标对齐",
   knowledgeAccuracy: "知识准确",
@@ -29,58 +23,71 @@ const labels: Record<string, string> = {
   assessmentDesign: "评价设计",
   languageAndFormat: "语言格式",
 };
-const rows = computed(() =>
-  Object.entries(labels).map(([key, label]) => ({
-    key,
-    label,
-    score: props.scores[key] ?? 0,
-  })),
+type ScoreRow = { key: string; label: string; score: number | null };
+type ScoredRow = { key: string; label: string; score: number };
+const rows = computed(
+  () =>
+    Object.entries(labels).map(([key, label]) => {
+      const value = props.scores?.[key];
+      return {
+        key,
+        label,
+        score:
+          typeof value === "number" &&
+          Number.isFinite(value) &&
+          value >= 0 &&
+          value <= 10
+            ? value
+            : null,
+      };
+    }) satisfies ScoreRow[],
 );
-function render() {
-  if (!chart.value) return;
-  instance ||= echarts.init(chart.value);
-  instance.setOption({
-    animationDuration: matchMedia("(prefers-reduced-motion: reduce)").matches
-      ? 0
-      : 500,
-    tooltip: {},
-    radar: {
-      indicator: rows.value.map((item) => ({ name: item.label, max: 10 })),
-      radius: "65%",
-      axisName: { color: "#334b59", fontSize: 11 },
-      splitArea: { areaStyle: { color: ["#fbfaf6", "#f4f1e8"] } },
-      axisLine: { lineStyle: { color: "#cbd7d3" } },
-      splitLine: { lineStyle: { color: "#d9dfdc" } },
-    },
-    series: [
-      {
-        type: "radar",
-        data: [
-          { value: rows.value.map((item) => item.score), name: "内部质量" },
-        ],
-        symbolSize: 5,
-        lineStyle: { color: "#147d78", width: 2 },
-        itemStyle: { color: "#147d78" },
-        areaStyle: { color: "rgba(29,148,141,.2)" },
-      },
-    ],
-  });
-}
-const resize = () => instance?.resize();
+const chartRows = computed(() =>
+  rows.value.filter((row): row is ScoredRow => row.score !== null),
+);
+const hasCompleteScores = computed(
+  () => chartRows.value.length === Object.keys(labels).length,
+);
+const validOverall = computed(() =>
+  typeof props.overall === "number" &&
+  Number.isFinite(props.overall) &&
+  props.overall >= 0 &&
+  props.overall <= 10
+    ? props.overall
+    : null,
+);
+const chartSlot = ref<HTMLDivElement>();
+const showChart = ref(false);
+let observer: globalThis.IntersectionObserver | undefined;
+const ChartFallback = defineComponent({
+  render: () =>
+    h("p", { class: "chart-fallback" }, "图表暂不可用，数值表仍可查看。"),
+});
+const RadarChartCanvas = defineAsyncComponent({
+  loader: () => import("./RadarChartCanvas.vue"),
+  errorComponent: ChartFallback,
+  delay: 150,
+  timeout: 15_000,
+});
 onMounted(() => {
-  nextTick(render);
-  window.addEventListener("resize", resize);
+  if (!chartSlot.value || !("IntersectionObserver" in window)) {
+    showChart.value = true;
+    return;
+  }
+  observer = new window.IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        showChart.value = true;
+        observer?.disconnect();
+      }
+    },
+    { rootMargin: "120px" },
+  );
+  observer.observe(chartSlot.value);
 });
-watch(
-  () => props.scores,
-  () => nextTick(render),
-  { deep: true },
-);
-onBeforeUnmount(() => {
-  window.removeEventListener("resize", resize);
-  instance?.dispose();
-});
+onBeforeUnmount(() => observer?.disconnect());
 </script>
+
 <template>
   <section class="score-panel surface">
     <div class="section-heading">
@@ -88,9 +95,11 @@ onBeforeUnmount(() => {
         <span class="eyebrow">Quality signals</span>
         <h2>八维内部质量</h2>
       </div>
-      <div v-if="overall != null" class="overall-score">
-        <strong>{{ overall.toFixed(1) }}</strong
-        ><span>/ 10</span>
+      <div class="overall-score" :class="{ unavailable: validOverall == null }">
+        <strong>{{
+          validOverall == null ? "暂不可用" : validOverall.toFixed(1)
+        }}</strong
+        ><span v-if="validOverall != null">/ 10</span>
       </div>
     </div>
     <p class="score-notice">
@@ -98,15 +107,22 @@ onBeforeUnmount(() => {
     </p>
     <div class="score-layout">
       <div
-        ref="chart"
-        class="radar-chart"
-        role="img"
-        aria-label="八维内部质量雷达图"
-      />
+        ref="chartSlot"
+        class="radar-slot"
+        :class="{ unavailable: !hasCompleteScores }"
+      >
+        <p v-if="!hasCompleteScores" class="chart-fallback">
+          部分维度暂无分数，暂不绘制雷达图；已提供的分数见数值表。
+        </p>
+        <RadarChartCanvas v-else-if="showChart" :rows="chartRows" />
+        <p v-else class="chart-fallback">
+          滚动到图表时加载；数值表可直接阅读。
+        </p>
+      </div>
       <dl class="score-list">
         <div v-for="row in rows" :key="row.key">
           <dt>{{ row.label }}</dt>
-          <dd>{{ row.score.toFixed(1) }}</dd>
+          <dd>{{ row.score == null ? "暂不可用" : row.score.toFixed(1) }}</dd>
         </div>
       </dl>
     </div>

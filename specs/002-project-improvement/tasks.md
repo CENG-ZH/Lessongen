@@ -22,24 +22,26 @@
 
 **Gate P0：通过（2026-09-23）。** 新电脑/干净环境可按唯一文档启动 F；离线 CI、真实 MySQL 迁移与 Docker 四服务冒烟均为绿灯；运行来源指纹证明仓库不依赖 C 盘。P1/P2 从下一独立变更开始，不与本 Gate 混合。
 
+P1 本轮记录见 [p1-acceptance.md](./p1-acceptance.md)。下面 `[x]` 表示本地实现及对应离线测试已完成，**不表示 Gate P1 或导师研究取舍已正式通过**。
+
 ## Phase 1A · 行为基线与生成初审（P1）
 
-- [ ] **T011 固定路由夹具**｜依赖：Gate P0。建立 generate/optimize 的假 Agent 集，覆盖 v0 高分、低分、无意见、意见冲突、预算不足、Critic 失败、改写失败和最佳版本回退；断言旧行为，以便区分重构和需求变化。证据：固定 `run_result`/trace 结构快照和非密钥 fixture。
-- [ ] **T012 冻结初审政策契约**｜依赖：T011。明确新策略 ID、生成与优化模式适用范围、何谓“已完成一次独立审查”、无可执行意见的停止原因、费用不足时的降级状态，以及历史 run/前端文案兼容方式。证据：更新 `spec.md` 对应 ADR 与领域测试清单，经项目负责人/导师确认；不要先改代码后定语义。
-- [ ] **T013 实现生成初审**｜依赖：T012。以配置开关使 generate v0 高分仍进入三 Critic；Validator 决定是否值得改写；不强制产生 v1，不将审查失败标为成功。证据：8.275 分固定样例出现三 Critic、裁决与准确停止原因；旧 fast path 只在显式实验配置中出现。
-- [ ] **T014 结果呈现一致**｜依赖：T013。Java/Web 结果页按 trace 区分“内部评分达标”“已独立审查”“发生真实内容改写”；未改写时说明原因。证据：生成 v0 审查后无意见、改写后 v1、Critic 失败三个前端测试与截图。
+- [x] **T011 固定路由夹具（本地）**｜generate/optimize 的假 Agent 集、失败注入和历史产物测试继续生效；`paper4_pipeline/tests/fixtures/p1_high_score_v0_review.json` 固定高分 v0 的结果及 trace 顺序。预算、Critic 失败、改写失败和最佳版本测试见 Python 全量回归。
+- [ ] **T012 冻结初审政策契约（待负责人确认）**｜策略 ID、适用范围、完整审查定义、停止/降级状态、历史文案已写入 `spec.md` 和 D04–D06 并有领域测试；尚无导师或项目负责人对新增默认成本与降级策略的正式确认。
+- [x] **T013 实现生成初审（本地）**｜高分 v0 进入三 Critic 与 Validator；无意见保持 v0，预算不足/零改写轮次不假装通过；`judge_first_fast_path` 只在显式配置下生效。
+- [x] **T014 结果呈现一致（本地）**｜Python trace 投影 → Java 结果 DTO → Vue 页面展示不同审查/内容变化状态；浏览器 E2E 附快路、已审查未改写截图，失败时优先展示真实停止原因。
 
 **Gate 1A：** 初稿高分不再绕过预定审查；没有意见不会制造假修改；旧优化行为没有回归。
 
 ## Phase 1B · 图、用量、契约和前端（P1）
 
-- [ ] **T015 拆出图装配与节点上下文**｜依赖：T011。保留 `Paper4Workflow` 入口与既有节点名，把 `design/bootstrap` 首先移出大文件；对外 schema、输出哈希与路由语义不变。证据：对应 characterization tests 与 graph 编译冒烟通过。
-- [ ] **T016 拆出审查/修订/结束节点**｜依赖：T015。分批迁移 Judge/Router、三 Critic/Validator、Rewriter/Verifier、Finalize；每批单独 PR，移完才删除旧实现。证据：失败注入、历史产物兼容与全量 Python 回归逐批通过。
-- [ ] **T017 统一调用账本**｜依赖：T015，可与 T016 分支独立设计。定义调用 ID/attempt ID、角色、状态、Token 来源、费用费率版本、非敏感错误；Provider、Normalizer、Graph 与 Web 投影统一消费。证据：成功、截断、重试、部分 Critic 失败的账目总和相等；未知 usage 显式标未知。
-- [ ] **T018 内部 API Schema 单源**｜依赖：T011。导出 Python OpenAPI/JSON Schema，建立版本号与 fixture；评估生成 Java `EngineContracts` 或以 CI 进行严格 schema diff，保留人工业务 Adapter。证据：故意删字段/改枚举使 Java 契约测试失败，向后兼容字段能通过。
-- [ ] **T019 前端 Store 与 E2E 补测**｜依赖：T014、T018。覆盖 jobs/connection store 的断连重试、刷新恢复、终态幂等、401/402、产物 404、上传原件与优化结果区分；至少新增一条生成和一条优化的端到端主路径。证据：CI 能稳定重跑，不依赖付费模型和固定等待时间。
+- [x] **T015 拆出图装配与节点上下文（本地）**｜`Paper4Workflow` 仍负责图装配/运行；Design/Bootstrap 节点独立，原节点名、入口及历史 schema 保持，离线图测试通过。
+- [ ] **T016 拆出审查/修订/结束节点（待审核流程）**｜三个节点群已迁移到独立模块，旧实现在 `graph.py` 中移除，Python 全量测试通过；原计划“每批单独 PR”没有执行，需在提交审核时按模块审阅，不能据此勾选正式完成。
+- [x] **T017 统一调用账本（本地）**｜Provider/Normalizer 使用同一 attempt schema、call/attempt ID、角色阶段、usage 来源与费率指纹；成功、重试、截断、402、取消、未知 usage 和账本写失败有测试。运行中 Web 投影优先读取账本，已完成 run 与 registry 预处理用量分账。
+- [x] **T018 内部 API Schema 单源（本地）**｜Python 序列化 JSON Schema 已冻结为版本化文件，CI `--check` 和 Java `ContractFixtureTest` 校验必需字段/状态；业务 Adapter 未被自动生成代码替换，新增可选 `review` 兼容旧结果。
+- [x] **T019 前端 Store 与 E2E 补测（本地）**｜终态 503 后重试、失败 recovery、SSE 断线轮询、刷新、401/402、生成/优化内容变化均有测试；产物列表 404 时教案仍可查看，并有浏览器用例。Edge E2E 13 项，未调用真实模型。
 
-**Gate P1：** 所有旧数据契约可读；trace/用量可对账；生成初审和 UI 表述一致；三端 CI 全绿。拆分若改变结果，先回滚该拆分，不同时推进并发。
+**Gate P1：待通过。** 本地功能与离线测试达标，但 T012 的导师/负责人确认、T016 的分模块审核流程、远端三端 CI 和真实 MySQL 容器测试尚缺证据；不能因为本机 Java 测试的 2 个 skip 把 Gate 标绿。拆分若改变结果，先回滚该拆分，不同时推进并发。
 
 ## Phase 2 · 能力试验（P2，按独立实验择优）
 

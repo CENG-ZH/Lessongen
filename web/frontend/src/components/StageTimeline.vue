@@ -16,56 +16,41 @@ const generateStages = [
 const optimizeStages = [
   ["queued", "任务入队"],
   ["docx_security_check", "Word 安全解析"],
-  ["design_architect", "设计路线"],
-  ["writer", "形成版本"],
-  ["judge", "内部初评"],
+  ["docx_normalize", "识别原稿内容"],
+  ["judge", "原稿内部评估"],
   ["critics", "三类批评"],
   ["validator", "意见校验"],
   ["rewriter", "定向改写"],
   ["verifier", "落实核验"],
+  ["optimization_pairwise_compare", "原稿与修改稿对照"],
   ["finalize", "整理产物"],
 ];
-const order: Record<string, number> = {
-  queued: 0,
-  dispatching: 0,
-  docx_security_check: 1,
-  preprocessing: 1,
-  run: 1,
-  bootstrap: 1,
-  design_architect: 2,
-  writer: 3,
-  judge: 4,
-  evaluation_router: 4,
-  critics: 5,
-  critique_aggregator: 5,
-  validator: 6,
-  validation_router: 6,
-  rewriter: 7,
-  verifier: 8,
-  finalize: 9,
-  exporting: 9,
-  completed: 10,
-  failed: 10,
+const aliases: Record<string, string> = {
+  dispatching: "queued",
+  preprocessing: "docx_security_check",
+  run: "queued",
+  bootstrap: "queued",
+  evaluation_router: "judge",
+  critique_aggregator: "critics",
+  validation_router: "validator",
+  exporting: "finalize",
 };
+const canonical = (stage: string) => aliases[stage] || stage;
 const stages = computed(() =>
   props.job.mode === "OPTIMIZE" ? optimizeStages : generateStages,
 );
-const furthest = computed(() =>
-  Math.max(
-    order[props.job.currentStage] ?? 0,
-    ...props.events.map((item) => order[item.stage] ?? 0),
-  ),
+const current = computed(() => canonical(props.job.currentStage));
+const currentIndex = computed(() =>
+  stages.value.findIndex((stage) => stage[0] === current.value),
+);
+const observed = computed(
+  () => new Set(props.events.map((item) => canonical(item.stage))),
 );
 const state = (stage: string, index: number) => {
-  if (props.job.status === "FAILED" && index === furthest.value)
-    return "failed";
-  const target = order[stage] ?? index;
-  if (
-    target < furthest.value ||
-    ["COMPLETED", "NEEDS_HUMAN"].includes(props.job.status)
-  )
-    return "done";
-  return target === furthest.value ? "active" : "waiting";
+  if (stage === current.value) return "active";
+  if (observed.value.has(stage)) return "seen";
+  if (currentIndex.value >= 0 && index < currentIndex.value) return "passed";
+  return "waiting";
 };
 </script>
 <template>
@@ -76,11 +61,15 @@ const state = (stage: string, index: number) => {
       :class="state(stage[0], index)"
     >
       <span class="stage-dot" aria-hidden="true">{{
-        state(stage[0], index) === "done" ? "✓" : index + 1
+        state(stage[0], index) === "seen" ? "✓" : index + 1
       }}</span>
       <div>
         <strong>{{ stage[1] }}</strong
         ><small v-if="state(stage[0], index) === 'active'">当前阶段</small>
+        <small v-else-if="state(stage[0], index) === 'seen'">本次已运行</small>
+        <small v-else-if="state(stage[0], index) === 'passed'"
+          >已越过，未保存逐步记录</small
+        >
       </div>
     </li>
   </ol>

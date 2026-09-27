@@ -7,10 +7,14 @@ never copied into graph state, traces, prompts, or exported artifacts.
 from __future__ import annotations
 
 import json
+import asyncio
 import re
 import os
+import hashlib
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Callable, Generic, TypeVar
+from uuid import uuid4
 
 from dotenv import find_dotenv, load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -19,7 +23,8 @@ from pydantic import BaseModel
 
 from paper4_pipeline.agents.prompts import PromptSpec
 from paper4_pipeline.agents.protocols import AgentCallMetadata
-from paper4_pipeline.domain.models import ModelConfig, TokenUsage
+from paper4_pipeline.domain.models import ModelCallAttempt, ModelConfig, TokenUsage
+from paper4_pipeline.observability.call_ledger import current_ledger
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -95,6 +100,19 @@ def _usage_from_message(message: object) -> TokenUsage:
         or 0
     )
     return TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens)
+
+
+def _message_reports_usage(message: object) -> bool:
+    raw = getattr(message, "usage_metadata", None) or {}
+    response_meta = getattr(message, "response_metadata", None) or {}
+    token_usage = response_meta.get("token_usage") or {}
+    return any(
+        key in raw for key in ("input_tokens", "output_tokens", "prompt_tokens", "completion_tokens")
+    ) or any(key in token_usage for key in ("prompt_tokens", "completion_tokens"))
+
+
+class CallLedgerWriteError(RuntimeError):
+    """The model returned, but its paid attempt could not be audited safely."""
 
 
 def _is_non_retryable_error(exc: Exception) -> bool:
@@ -224,8 +242,23 @@ class OpenAICompatibleProvider:
         previous_invalid_output = ""
         attempts_made = 0
         allowed_attempts = max_attempts or self.settings.max_retries + 1
+        call_id = uuid4().hex
+        config_sha256 = hashlib.sha256(
+            self.settings.model_dump_json().encode("utf-8")
+        ).hexdigest()
+        rate_id = hashlib.sha256(
+            json.dumps({
+                "model": self.settings.model_name,
+                "input_per_million": self.settings.input_cost_per_million,
+                "output_per_million": self.settings.output_cost_per_million,
+            }, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:16]
         for attempt in range(1, allowed_attempts + 1):
             attempts_made = attempt
+            attempt_started = perf_counter()
+            attempt_usage: TokenUsage | None = None
+            usage_source = "unknown"
+            finish_reason = ""
             messages = [
                 SystemMessage(content=system),
                 HumanMessage(content=base_input),
@@ -245,6 +278,9 @@ class OpenAICompatibleProvider:
                     }
                 message = client.bind(**bind_options).invoke(messages)
                 usage = _usage_from_message(message)
+                attempt_usage = usage if _message_reports_usage(message) else None
+                if attempt_usage is not None:
+                    usage_source = "provider_response"
                 total_usage = TokenUsage(
                     input_tokens=total_usage.input_tokens + usage.input_tokens,
                     output_tokens=total_usage.output_tokens + usage.output_tokens,
@@ -256,6 +292,13 @@ class OpenAICompatibleProvider:
                     result_validator(value)
                 response_meta = getattr(message, "response_metadata", None) or {}
                 finish_reason = str(response_meta.get("finish_reason", ""))
+                self._record_attempt(
+                    call_id=call_id, stage=stage, prompt=prompt, config_sha256=config_sha256,
+                    rate_id=rate_id, attempt=attempt, status="ok", usage=attempt_usage,
+                    usage_source=usage_source,
+                    duration_seconds=perf_counter() - attempt_started,
+                    finish_reason=finish_reason,
+                )
                 response_id = str(getattr(message, "id", "") or "")
                 cost = (
                     total_usage.input_tokens
@@ -279,7 +322,28 @@ class OpenAICompatibleProvider:
                         thinking_mode=self.settings.thinking_mode,
                     ),
                 )
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                self._record_attempt(
+                    call_id=call_id, stage=stage, prompt=prompt,
+                    config_sha256=config_sha256, rate_id=rate_id,
+                    attempt=attempt, status="cancelled", usage=attempt_usage,
+                    usage_source=usage_source,
+                    duration_seconds=perf_counter() - attempt_started,
+                    error_type="Cancelled",
+                )
+                raise
             except Exception as exc:
+                if isinstance(exc, CallLedgerWriteError):
+                    cost = (
+                        total_usage.input_tokens * self.settings.input_cost_per_million
+                        + total_usage.output_tokens * self.settings.output_cost_per_million
+                    ) / 1_000_000
+                    raise ProviderInvocationError(
+                        f"{stage} stopped because model call accounting could not be persisted",
+                        attempts=attempts_made,
+                        usage=total_usage,
+                        estimated_cost=cost,
+                    ) from exc
                 raw_error = f"{type(exc).__name__}: {exc}"
                 api_key = os.getenv(self.settings.api_key_env, "").strip()
                 last_error = raw_error.replace(api_key, "[REDACTED]") if api_key else raw_error
@@ -289,11 +353,28 @@ class OpenAICompatibleProvider:
                 if "length limit was reached" in raw_error.lower():
                     prompt_match = re.search(r"prompt_tokens=(\d+)", raw_error)
                     output_match = re.search(r"completion_tokens=(\d+)", raw_error)
-                    if prompt_match and output_match:
-                        total_usage = TokenUsage(
-                            input_tokens=total_usage.input_tokens + int(prompt_match.group(1)),
-                            output_tokens=total_usage.output_tokens + int(output_match.group(1)),
+                    if prompt_match and output_match and attempt_usage is None:
+                        attempt_usage = TokenUsage(
+                            input_tokens=int(prompt_match.group(1)),
+                            output_tokens=int(output_match.group(1)),
                         )
+                        total_usage = TokenUsage(
+                            input_tokens=total_usage.input_tokens + attempt_usage.input_tokens,
+                            output_tokens=total_usage.output_tokens + attempt_usage.output_tokens,
+                        )
+                        usage_source = "truncation_exception"
+                self._record_attempt(
+                    call_id=call_id, stage=stage, prompt=prompt, config_sha256=config_sha256,
+                    rate_id=rate_id, attempt=attempt,
+                    status=(
+                        "truncated" if "length limit was reached" in raw_error.lower()
+                        else "invalid_output" if attempt_usage is not None else "failed"
+                    ),
+                    usage=attempt_usage,
+                    usage_source=usage_source,
+                    duration_seconds=perf_counter() - attempt_started,
+                    error_type=type(exc).__name__,
+                )
                 # A whole-document import that already hit the output cap will
                 # hit it again with the same schema. Retrying adds the failed
                 # response to the prompt and only increases cost/context use.
@@ -318,3 +399,38 @@ class OpenAICompatibleProvider:
             usage=total_usage,
             estimated_cost=cost,
         )
+
+    def _record_attempt(
+        self, *, call_id: str, stage: str, prompt: PromptSpec, config_sha256: str,
+        rate_id: str, attempt: int, status: str, usage: TokenUsage | None,
+        usage_source: str, duration_seconds: float, finish_reason: str = "", error_type: str = "",
+    ) -> None:
+        ledger = current_ledger()
+        if ledger is None:
+            return
+        cost = None if usage is None else (
+            usage.input_tokens * self.settings.input_cost_per_million
+            + usage.output_tokens * self.settings.output_cost_per_million
+        ) / 1_000_000
+        try:
+            ledger.append(ModelCallAttempt(
+                call_id=call_id,
+                attempt_id=uuid4().hex,
+                stage=stage,
+                model_name=self.settings.model_name,
+                prompt_id=prompt.prompt_id,
+                prompt_sha256=prompt.sha256,
+                config_sha256=config_sha256,
+                rate_id=rate_id,
+                attempt_index=attempt,
+                status=status,
+                usage_source=usage_source,
+                input_tokens=usage.input_tokens if usage is not None else None,
+                output_tokens=usage.output_tokens if usage is not None else None,
+                estimated_cost=cost,
+                duration_seconds=max(0.0, duration_seconds),
+                finish_reason=finish_reason,
+                error_type=error_type,
+            ))
+        except OSError as exc:
+            raise CallLedgerWriteError("model call accounting write failed") from exc

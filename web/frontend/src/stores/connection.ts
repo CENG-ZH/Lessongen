@@ -6,6 +6,10 @@ export const useConnectionStore = defineStore("connection", {
     updatedAt: "",
   }),
   actions: {
+    reset() {
+      this.mode = "connecting";
+      this.updatedAt = "";
+    },
     setLive(value: boolean) {
       this.mode = value ? "live" : "polling";
     },

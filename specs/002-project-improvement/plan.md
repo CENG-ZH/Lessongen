@@ -50,13 +50,13 @@ P0 退出：在干净环境启动三个服务，Java 和 Python 指纹均为 F�
 
 ### 2.3 初稿审查与停止路由
 
-引入版本化策略，例如 `generation_review_policy=at_least_one_independent_review`（新默认）与 `judge_first_fast_path`（仅实验对照）。路由记录策略 ID：v0 即使总分达标，也先进入三 Critic；Critic/Validator 之后若没有可执行意见，可以 `reviewed_no_actionable_feedback` 正常结束，标明“已审查、未改写”。若有意见，继续现有改写、核验和复评。质量达标停止只能在满足该策略的审查要求后触发；不能无条件强制生成 v1，也不能把 Critic 失败写成完成审查。
+引入 `generation_review_policy=at_least_one_independent_review`（新默认）与 `judge_first_fast_path`（仅显式实验对照）。路由记录策略 ID：v0 即使总分达标，也先进入三 Critic；Critic/Validator 之后若没有可执行意见，沿用既有 `no_actionable_feedback` 停止原因，结果页标明“已审查、未改写”。若有意见，继续现有改写、核验和复评。质量达标停止只能在满足该策略的审查要求后触发；不能无条件强制生成 v1，也不能把 Critic 失败写成完成审查。
 
 资源不足时在进入审查前做真实预算检查：已有 v0 可做降级交付并标 `needs_human`/预算停止（最终状态与旧规范衔接需在实现前冻结），但不能标 `quality_passed`。优化任务原有强制初审不得回退。网页显示实际参与的角色、版本数和“未改写”的具体原因，数据来自 trace 而不是硬编码文案。
 
 ### 2.4 调用账本与契约
 
-Provider 层新增每次尝试的唯一 ID、结果状态、请求模型、Prompt/config 指纹、输入/输出 Token、估算费用、耗时和非敏感错误类别。节点只汇总 ledger，Web projection 只读取汇总，避免 Provider、Graph、Normalizer、Web 各自猜一次用量。对截断异常、解析失败、重试和 Critic 批次部分失败写恰好一次累加测试；当上游不返回 usage 时显式记录 `unknown`，不把未知当 0。
+Provider 层新增每次尝试的唯一 ID、结果状态、请求模型、Prompt/config 指纹、输入/输出 Token、估算费用、耗时和非敏感错误类别。节点保留原有预算汇总，Web 运行中投影优先读取统一 ledger，正常结束继续读取 `run_result` 与预处理汇总；两者按“已知用量”对账，不重复累计 trace 事件。对截断异常、解析失败、重试和 Critic 批次部分失败写恰好一次累加测试；当上游不返回 usage 时 ledger 的字段为 `null`，Web 数字只能当作已知部分和，不能称为实际账单。
 
 内部 API 的 Pydantic/OpenAPI 是协议定义，导出稳定 schema 文件供 Java 生成或检查 `EngineContracts`；保留 Java Adapter 的业务映射与错误转换。CI 比对当前导出与提交版本，兼容策略按“新增可选字段 → 向后兼容；删除/改义字段 → 版本升级”执行。前端优先给 jobs/connection stores 与任务页、优化结果页补单测/E2E，确认状态恢复与产物语义。
 

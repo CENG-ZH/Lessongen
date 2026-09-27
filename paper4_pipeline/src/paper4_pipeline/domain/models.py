@@ -692,6 +692,27 @@ class TokenUsage(StrictModel):
         return self.input_tokens + self.output_tokens
 
 
+class ModelCallAttempt(StrictModel):
+    schema_version: Literal["paper4-model-call-v0.1"] = "paper4-model-call-v0.1"
+    call_id: str = ""  # empty only when reading an older P1 ledger
+    attempt_id: str = Field(min_length=1)
+    stage: str = Field(min_length=1)
+    model_name: str = Field(min_length=1)
+    prompt_id: str = Field(min_length=1)
+    prompt_sha256: str = Field(min_length=64, max_length=64)
+    config_sha256: str = Field(min_length=64, max_length=64)
+    rate_id: str = Field(min_length=1)
+    attempt_index: int = Field(ge=1)
+    status: Literal["ok", "invalid_output", "truncated", "failed", "cancelled"]
+    usage_source: Literal["provider_response", "truncation_exception", "unknown"] = "unknown"
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    estimated_cost: float | None = Field(default=None, ge=0)
+    duration_seconds: float = Field(ge=0)
+    finish_reason: str = ""
+    error_type: str = ""
+
+
 class LessonPlanVersion(StrictModel):
     schema_version: Literal["paper4-plan-version-v0.1"] = (
         "paper4-plan-version-v0.1"
@@ -776,6 +797,11 @@ class ExperimentConfig(StrictModel):
         "cross_examination",
         "proposer_challenger",
     ] = "independent_review"
+    # Existing serialized run results remain readable. New tasks require a
+    # review by default; the historical fast path is an explicit experiment.
+    generation_review_policy: Literal[
+        "at_least_one_independent_review", "judge_first_fast_path"
+    ] = "at_least_one_independent_review"
     max_rounds: int = Field(default=3, ge=0, le=20)
     # Optimization is a bounded revision task, not a second generation run.
     optimization_max_rounds: int = Field(default=3, ge=1, le=20)
@@ -908,6 +934,7 @@ class PipelineResult(StrictModel):
     model_call_count: int = Field(default=0, ge=0)
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
     estimated_cost: float = Field(default=0, ge=0)
+    model_calls: list[ModelCallAttempt] = Field(default_factory=list)
     trace_path: str = ""
     artifacts: ArtifactManifest | None = None
     errors: list[str] = Field(default_factory=list)

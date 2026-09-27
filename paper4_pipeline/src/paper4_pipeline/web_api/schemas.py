@@ -138,6 +138,14 @@ class ImplementedChangeSummary(StrictModel):
     summary: str
 
 
+class ReviewSummary(StrictModel):
+    policy: str = "legacy_unknown"
+    reviewed_roles: list[str] = Field(default_factory=list)
+    validator_completed: bool = False
+    independent_review_complete: bool = False
+    content_changed: bool = False
+
+
 class EngineResult(StrictModel):
     engine_run_id: str
     external_job_id: str
@@ -149,6 +157,7 @@ class EngineResult(StrictModel):
     rubric_scores: RubricScores | None = None
     overall_score: float | None = Field(default=None, ge=0, le=10)
     optimization: dict[str, JsonValue] | None = None
+    review: ReviewSummary | None = None
     implemented_changes: list[ImplementedChangeSummary] = Field(default_factory=list)
     unresolved_issues: list[str] = Field(default_factory=list)
     parse_warnings: list[str] = Field(default_factory=list)

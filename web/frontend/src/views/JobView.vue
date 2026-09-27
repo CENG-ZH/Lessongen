@@ -10,6 +10,7 @@ import StageTimeline from "../components/StageTimeline.vue";
 import ScorePanel from "../components/ScorePanel.vue";
 import LessonPreview from "../components/LessonPreview.vue";
 import OptimizationPanel from "../components/OptimizationPanel.vue";
+import { lessonPathLabel } from "../utils/lessonPresentation";
 
 const props = defineProps<{ jobId: string }>();
 const router = useRouter();
@@ -20,12 +21,25 @@ const loadError = ref("");
 let stopEvents: (() => void) | undefined;
 let polling: number | undefined;
 let terminalLoaded = false;
+let terminalDataInFlight: Promise<boolean> | undefined;
+let active = true;
+let requestSequence = 0;
+let appliedSequence = 0;
 const job = computed(() => store.current);
 const terminal = computed(
   () => !!job.value && terminalStatuses.includes(job.value.status),
 );
+const stagePercent = computed(() => {
+  const value = job.value?.progressPercent;
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(100, Math.max(0, value))
+    : null;
+});
 const latestMessage = computed(
-  () => events.value.at(-1)?.message || stageMessage(job.value?.currentStage),
+  () =>
+    (events.value.at(-1)?.stage === job.value?.currentStage
+      ? events.value.at(-1)?.message
+      : "") || stageMessage(job.value?.currentStage),
 );
 const primaryArtifact = computed(() =>
   store.artifacts.find((item) => item.type === "BEST_DOCX"),
@@ -62,34 +76,67 @@ const stopLabel: Record<string, string> = {
   validation_error: "结构校验未通过",
   runtime_error: "运行环境异常",
 };
+const generatedReview = computed(() =>
+  job.value?.mode === "GENERATE" ? store.result?.review : null,
+);
+const generateOutcome = computed(() => {
+  const review = generatedReview.value;
+  if (!review?.independent_review_complete)
+    return "教案已生成，独立审查尚未完成";
+  return review.content_changed
+    ? "已完成独立审查并形成修改稿"
+    : "已完成独立审查，教案未改写";
+});
 async function sync() {
+  const requestId = ++requestSequence;
   try {
     const next = await getJob(props.jobId);
+    if (!active || requestId < appliedSequence) return null;
+    if (terminal.value && !terminalStatuses.includes(next.status))
+      return job.value;
+    appliedSequence = requestId;
     store.current = next;
     connection.touched();
     loadError.value = "";
+    if (terminalStatuses.includes(next.status)) {
+      stopEvents?.();
+      stopEvents = undefined;
+    }
     if (terminalStatuses.includes(next.status) && !terminalLoaded) {
-      terminalLoaded = true;
-      await store.loadTerminalData(props.jobId);
-      if (polling) window.clearInterval(polling);
+      terminalDataInFlight ||= store.loadTerminalData(
+        props.jobId,
+        next.status === "FAILED",
+      );
+      const loaded = await terminalDataInFlight;
+      terminalDataInFlight = undefined;
+      if (!active) return null;
+      terminalLoaded = loaded;
+      if (terminalLoaded && polling) {
+        window.clearInterval(polling);
+        polling = undefined;
+      }
     }
     return next;
   } catch (reason) {
-    loadError.value = reason instanceof Error ? reason.message : "无法读取任务";
+    if (active && requestId === requestSequence)
+      loadError.value =
+        reason instanceof Error ? reason.message : "无法读取任务";
     return null;
   }
 }
 function received(event: JobEvent) {
+  if (!active || terminal.value) return;
   if (!events.value.some((item) => item.sequence === event.sequence))
     events.value.push(event);
   events.value.sort((a, b) => a.sequence - b.sequence);
-  sync();
+  void sync();
 }
 function stageMessage(stage?: string | null) {
   const labels: Record<string, string> = {
     queued: "任务正在等待执行",
     dispatching: "正在准备引擎请求",
     docx_security_check: "正在检查并提取原 Word",
+    docx_normalize: "正在识别 Word 中的教学内容",
     design_architect: "正在比较教学设计路线",
     writer: "Writer 正在形成可试教版本",
     judge: "Judge 正在进行八维内部质量检查",
@@ -102,32 +149,83 @@ function stageMessage(stage?: string | null) {
   };
   return labels[stage || ""] || "多智能体流程正在推进";
 }
+function ensureUpdates(next: NonNullable<typeof job.value>) {
+  if (!terminalStatuses.includes(next.status) && !stopEvents) {
+    stopEvents = connectJobEvents(props.jobId, received, (value) =>
+      connection.setLive(value),
+    );
+  }
+  if (!terminalLoaded && !polling) {
+    polling = window.setInterval(() => {
+      if ((terminal.value && !terminalLoaded) || connection.mode !== "live")
+        void sync();
+    }, 2000);
+  }
+}
+function settleTerminalData() {
+  terminalLoaded = store.resultReady && store.artifactsReady;
+  if (terminalLoaded && polling) {
+    window.clearInterval(polling);
+    polling = undefined;
+  }
+}
+async function retryResult() {
+  await store.loadResult(props.jobId, job.value?.status === "FAILED");
+  if (active) settleTerminalData();
+}
+async function retryArtifacts() {
+  await store.loadArtifacts(props.jobId);
+  if (active) settleTerminalData();
+}
+async function resume() {
+  const next = await sync();
+  if (next) ensureUpdates(next);
+}
 onMounted(async () => {
+  active = true;
   store.resetCurrent();
+  connection.reset();
   const initial = await sync();
   // Use the response directly instead of relying on a computed invalidation tick;
   // otherwise a fast terminal response can briefly open an unnecessary EventSource.
-  if (!initial || terminalStatuses.includes(initial.status)) return;
-  stopEvents = connectJobEvents(props.jobId, received, (value) =>
-    connection.setLive(value),
-  );
-  polling = window.setInterval(() => {
-    if (connection.mode !== "live" && !terminal.value) sync();
-  }, 2000);
+  if (!initial) return;
+  ensureUpdates(initial);
 });
 onBeforeUnmount(() => {
+  active = false;
+  requestSequence += 1;
   stopEvents?.();
   if (polling) window.clearInterval(polling);
   store.resetCurrent();
 });
-const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
+const fmt = (value?: number | null) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? new Intl.NumberFormat("zh-CN").format(value)
+    : "暂不可用";
+const cost = (value?: number | null) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? `$${value.toFixed(4)}`
+    : "暂不可用";
+const durationLabel = (value?: number | null) =>
+  typeof value === "number" && Number.isFinite(value) && value > 0
+    ? `${value} 分钟`
+    : "课时待确认";
+const lastUpdated = computed(() =>
+  connection.updatedAt
+    ? new Intl.DateTimeFormat("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }).format(new Date(connection.updatedAt))
+    : "暂不可用",
+);
 </script>
 <template>
-  <div v-if="loadError && !job" class="empty-state error-state">
+  <div v-if="loadError && !job" class="empty-state error-state" role="alert">
     <span>!</span>
     <h2>暂时无法打开任务</h2>
     <p>{{ loadError }}</p>
-    <button class="secondary-button" @click="sync">重新加载</button>
+    <button class="secondary-button" @click="resume">重新加载</button>
   </div>
   <template v-else-if="job">
     <header class="job-hero">
@@ -146,7 +244,8 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
         </div>
         <h1>{{ job.topic }}</h1>
         <p>
-          {{ job.subject }} · {{ job.grade }} · {{ job.durationMinutes }} 分钟
+          {{ job.subject }} · {{ job.grade }} ·
+          {{ durationLabel(job.durationMinutes) }}
         </p>
       </div>
       <div
@@ -163,6 +262,10 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
         }}</span>
       </div>
     </header>
+    <div v-if="loadError" class="recent-alert" role="alert">
+      <span>任务同步暂时中断，页面显示的是上次读取的状态：{{ loadError }}</span>
+      <button type="button" @click="resume">重新同步</button>
+    </div>
 
     <template v-if="!terminal">
       <div class="progress-layout">
@@ -170,12 +273,25 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
           <div class="progress-heading">
             <div>
               <span class="eyebrow">LIVE PIPELINE</span>
-              <h2>{{ latestMessage }}</h2>
+              <h2 aria-live="polite" aria-atomic="true">{{ latestMessage }}</h2>
+              <p class="progress-caption">
+                系统阶段进度，不代表剩余时间；上次同步 {{ lastUpdated }}。
+              </p>
             </div>
-            <strong>{{ job.progressPercent }}%</strong>
+            <strong>{{
+              stagePercent == null ? "暂不可用" : `${stagePercent}%`
+            }}</strong>
           </div>
-          <div class="large-progress">
-            <i :style="{ width: `${job.progressPercent}%` }" />
+          <div
+            v-if="stagePercent != null"
+            class="large-progress"
+            role="progressbar"
+            aria-label="系统阶段进度"
+            :aria-valuenow="stagePercent"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <i :style="{ width: `${stagePercent}%` }" />
           </div>
           <StageTimeline :job="job" :events="events" />
           <div class="leave-note">
@@ -197,21 +313,25 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
             <dl>
               <div>
                 <dt>模型调用</dt>
-                <dd>{{ job.usage.modelCallCount }}</dd>
+                <dd>{{ fmt(job.usage?.modelCallCount) }}</dd>
               </div>
               <div>
                 <dt>输入 Token</dt>
-                <dd>{{ fmt(job.usage.inputTokens) }}</dd>
+                <dd>{{ fmt(job.usage?.inputTokens) }}</dd>
               </div>
               <div>
                 <dt>输出 Token</dt>
-                <dd>{{ fmt(job.usage.outputTokens) }}</dd>
+                <dd>{{ fmt(job.usage?.outputTokens) }}</dd>
               </div>
               <div>
                 <dt>估算费用</dt>
-                <dd>${{ Number(job.usage.estimatedCost).toFixed(4) }}</dd>
+                <dd>{{ cost(job.usage?.estimatedCost) }}</dd>
               </div>
             </dl>
+            <p class="usage-note">
+              Token
+              与费用仅汇总供应商已返回的用量；未返回用量的调用可能未计入，实际账单以供应商为准。
+            </p>
           </details>
         </aside>
       </div>
@@ -220,7 +340,13 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
     <template v-else>
       <section class="result-banner" :class="job.status.toLowerCase()">
         <div>
-          <span class="eyebrow">RUN FINISHED</span>
+          <span class="eyebrow">{{
+            job.status === "FAILED"
+              ? "任务未完成"
+              : job.status === "NEEDS_HUMAN"
+                ? "等待教师复核"
+                : "处理完成"
+          }}</span>
           <h2>
             {{
               job.status === "COMPLETED"
@@ -232,7 +358,7 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
                     ? "已形成修改稿，建议教师复核"
                     : job.mode === "OPTIMIZE"
                       ? "优化流程已结束，等待结果核验"
-                      : "教案闭环已完成"
+                      : generateOutcome
                 : job.status === "NEEDS_HUMAN"
                   ? job.mode === "OPTIMIZE" &&
                     job.stopReason === "rewrite_failed"
@@ -250,6 +376,14 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
                 ? "审查产生了可执行意见，但改写未通过校验；当前只保留原稿，并非没有优化空间。"
                 : "") ||
               job.errorMessage ||
+              (job.status !== "COMPLETED" && job.stopReason
+                ? stopLabel[job.stopReason]
+                : "") ||
+              (job.mode === "GENERATE" && generatedReview
+                ? generatedReview.independent_review_complete
+                  ? `已完成 ${generatedReview.reviewed_roles.length} 类角色审查及 Validator 裁决；${generatedReview.content_changed ? "交付稿有内容修改。" : "交付稿内容未改变。"}`
+                  : "目前只有内部评分或部分审查记录，不能称为完成三方独立审查。"
+                : "") ||
               (job.mode === "OPTIMIZE"
                 ? store.result?.optimization?.message
                 : "") ||
@@ -274,6 +408,11 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
                     ? "下载 Word（内容变化待核验）"
                     : "下载 Word"
             }}</a
+          ><RouterLink
+            v-if="store.result"
+            class="secondary-button result-jump"
+            :to="{ hash: '#lesson-content' }"
+            >直接阅读教案</RouterLink
           ><a
             v-if="revisedCandidateArtifact"
             class="secondary-button"
@@ -284,7 +423,8 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
             :key="item.artifactId"
             class="secondary-button"
             :href="item.downloadUrl"
-            >{{ item.type.includes("MARKDOWN") ? "Markdown" : "JSON" }}</a
+            >{{ item.type.startsWith("RECOVERY_") ? "恢复记录 " : ""
+            }}{{ item.type.includes("MARKDOWN") ? "Markdown" : "JSON" }}</a
           >
           <a
             v-for="item in optimizationReports"
@@ -295,38 +435,61 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
           >
         </div>
       </section>
+      <div v-if="store.artifactWarning" class="recent-alert" role="alert">
+        <span>{{ store.artifactWarning }}</span>
+        <button
+          type="button"
+          :disabled="store.artifactLoading"
+          @click="retryArtifacts"
+        >
+          {{ store.artifactLoading ? "正在重试…" : "重试读取下载文件" }}
+        </button>
+      </div>
+      <div v-if="store.resultError" class="recent-alert" role="alert">
+        <span>{{ store.resultError }}</span>
+        <button
+          type="button"
+          :disabled="store.resultLoading"
+          @click="retryResult"
+        >
+          {{ store.resultLoading ? "正在重试…" : "重试读取教案结果" }}
+        </button>
+      </div>
       <div v-if="store.result" class="result-grid">
-        <main>
+        <div class="result-main">
           <p
             v-if="job.mode === 'OPTIMIZE' && !store.result.optimization"
             class="surface"
           >
             该历史任务未保存优化前后对比。仅有分数变化不能证明教案内容被修改。
           </p>
+          <p
+            v-if="job.mode === 'GENERATE' && !store.result.review"
+            class="surface"
+          >
+            这条历史任务没有保存独立审查记录；内部评分不代表已完成三方审查。
+          </p>
           <OptimizationPanel
             v-if="job.mode === 'OPTIMIZE' && store.result.optimization"
             :summary="store.result.optimization"
-          />
-          <LessonPreview :plan="store.result.bestLessonPlan" />
-        </main>
-        <aside class="result-sidebar">
-          <ScorePanel
-            :scores="store.result.scores"
-            :overall="store.result.overallScore"
           />
           <section
             v-if="job.mode !== 'OPTIMIZE' && store.result.changes.length"
             class="surface issue-card"
           >
-            <span class="eyebrow">CHANGES</span>
-            <h2>本轮主要修改</h2>
+            <span class="eyebrow">本轮修改</span>
+            <h2>这份教案实际改了什么</h2>
             <ul>
               <li
                 v-for="item in store.result.changes.slice(0, 8)"
                 :key="`${item.targetPath}-${item.summary}`"
               >
-                <strong>{{ item.targetPath }}</strong
-                ><span>{{ item.summary }}</span>
+                <strong>{{ lessonPathLabel(item.targetPath) }}</strong>
+                <span>{{ item.summary }}</span>
+                <details class="technical-path">
+                  <summary>技术位置</summary>
+                  <code>{{ item.targetPath }}</code>
+                </details>
               </li>
             </ul>
           </section>
@@ -337,8 +500,8 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
             "
             class="surface issue-card warning"
           >
-            <span class="eyebrow">REVIEW</span>
-            <h2>教师复核清单</h2>
+            <span class="eyebrow">教师复核</span>
+            <h2>使用前仍需确认</h2>
             <ul>
               <li
                 v-for="item in [
@@ -351,18 +514,44 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
               </li>
             </ul>
           </section>
+          <LessonPreview
+            id="lesson-content"
+            :plan="store.result.bestLessonPlan"
+          />
+        </div>
+        <aside class="result-sidebar">
+          <ScorePanel
+            :scores="store.result.scores"
+            :overall="store.result.overallScore"
+          />
         </aside>
       </div>
       <section v-else class="surface failed-panel">
         <h2>
           {{
-            job.status === "FAILED" ? "没有可展示的完整版本" : "正在读取结果"
+            job.status === "FAILED"
+              ? "没有可展示的完整版本"
+              : store.resultError
+                ? "教案结果暂时无法读取"
+                : "正在读取结果"
           }}
         </h2>
-        <p v-if="job.status === 'FAILED'">
-          系统不会用空白或硬编码教案冒充结果。下方标为“上传原件”的文件不是优化结果；
-          如有 recovery 产物可下载，或根据错误信息处理后再创建任务。
+        <p v-if="store.resultError && job.status !== 'FAILED'">
+          下载文件如已列出，仍可先取回；也可以使用上方按钮单独重试读取教案。
         </p>
+        <p v-if="job.status === 'FAILED'">
+          系统不会用空白教案冒充结果。“上传原件”是您提交的
+          Word；“恢复记录”仅保存可取回的运行内容，
+          不是已完成的优化稿。请查看上方原因，处理后重新创建任务。
+        </p>
+        <RouterLink
+          v-if="job.status === 'FAILED'"
+          class="secondary-button"
+          :to="
+            job.mode === 'OPTIMIZE' ? '/create/optimize' : '/create/generate'
+          "
+          >重新创建任务</RouterLink
+        >
         <div v-if="store.artifacts.length" class="artifact-list">
           <a
             v-for="item in store.artifacts"
@@ -371,7 +560,9 @@ const fmt = (value: number) => new Intl.NumberFormat("zh-CN").format(value);
             >{{
               item.type === "ORIGINAL_DOCX"
                 ? `上传原件：${item.displayName}`
-                : item.displayName
+                : item.type.startsWith("RECOVERY_")
+                  ? `恢复记录 ${item.type.endsWith("MARKDOWN") ? "Markdown" : "JSON"}`
+                  : item.displayName
             }}<small>{{ (item.sizeBytes / 1024).toFixed(1) }} KB</small></a
           >
         </div>

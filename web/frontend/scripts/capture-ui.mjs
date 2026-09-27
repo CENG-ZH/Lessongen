@@ -1,12 +1,13 @@
 import { chromium } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { preview } from "vite";
 
 const jobId = "01J00000000000000000000000";
-const outputDirectory = fileURLToPath(
-  new URL("../../docs/ui-audit", import.meta.url),
-);
+const outputDirectory = process.env.LESSONGEN_UI_AUDIT_DIR
+  ? resolve(process.env.LESSONGEN_UI_AUDIT_DIR)
+  : fileURLToPath(new URL("../../docs/ui-audit", import.meta.url));
 
 const job = {
   jobId,
@@ -96,6 +97,17 @@ const result = {
   },
   overallScore: 8.3,
   scoreNotice: "内部质量信号，不代表正式教学效果评价",
+  review: {
+    policy: "at_least_one_independent_review",
+    reviewed_roles: [
+      "subject_critic_v0_1",
+      "pedagogy_critic_v0_1",
+      "alignment_critic_v0_1",
+    ],
+    validator_completed: true,
+    independent_review_complete: true,
+    content_changed: true,
+  },
   changes: [
     {
       summary: "补充了结构—性质证据链",
@@ -112,7 +124,71 @@ const result = {
   parseWarnings: [],
 };
 
-async function installRoutes(context) {
+const optimization = {
+  outcome: "changed",
+  message: "已形成内容修改稿，请教师核对原稿与交付稿。",
+  baseline_version_id: "v0",
+  selected_version_id: "v1",
+  content_changed: true,
+  changed_section_count: 1,
+  changed_sections: [
+    {
+      field: "procedure_steps",
+      label: "教学过程",
+      before: ["教师讲解后学生完成练习"],
+      after: ["学生比较结构证据、讨论反例，再解释性质差异"],
+    },
+  ],
+  baseline_score: 7.5,
+  selected_score: 8.3,
+  score_delta: 0.8,
+  score_notice: "内部评分仅用于筛选候选版本，不代表真实课堂效果。",
+  critique_count: 5,
+  reviewed_issues: [],
+  validation_batch_count: 1,
+  rewrite_count: 1,
+  rounds: [],
+  stop_reason: "quality_passed",
+};
+
+async function installRoutes(context, scenario) {
+  const isOptimize = [
+    "optimize",
+    "unchanged",
+    "needs-human",
+    "failed",
+  ].includes(scenario);
+  const isFailed = scenario === "failed";
+  const isUnchanged = scenario === "unchanged";
+  const isNeedsHuman = scenario === "needs-human";
+  const scenarioJob = {
+    ...job,
+    mode: isOptimize ? "OPTIMIZE" : "GENERATE",
+    status: isFailed ? "FAILED" : isNeedsHuman ? "NEEDS_HUMAN" : "COMPLETED",
+    stopReason: isFailed
+      ? "rewrite_failed"
+      : isUnchanged
+        ? "no_actionable_feedback"
+        : isNeedsHuman
+          ? "max_rounds"
+          : "quality_passed",
+    errorMessage: isFailed ? "改写未通过结构校验，原稿仍可取回。" : null,
+  };
+  const scenarioOptimization = isUnchanged
+    ? {
+        ...optimization,
+        outcome: "reviewed_unchanged",
+        message: "已完成审查，但交付稿没有内容变化。",
+        selected_version_id: "v0",
+        content_changed: false,
+        changed_section_count: 0,
+        changed_sections: [],
+        selected_score: 7.5,
+        score_delta: 0,
+        rewrite_count: 0,
+        stop_reason: "no_actionable_feedback",
+      }
+    : optimization;
   await context.route(/\/api\/v1\/lesson-jobs(?:\?.*)?$/, (route) =>
     route.fulfill({
       json: {
@@ -125,18 +201,26 @@ async function installRoutes(context) {
     }),
   );
   await context.route(`**/api/v1/lesson-jobs/${jobId}`, (route) =>
-    route.fulfill({ json: job }),
+    route.fulfill({ json: scenarioJob }),
   );
   await context.route(`**/api/v1/lesson-jobs/${jobId}/result`, (route) =>
-    route.fulfill({ json: result }),
+    isFailed
+      ? route.fulfill({ status: 404, json: { detail: "没有完整结果" } })
+      : route.fulfill({
+          json: isOptimize
+            ? { ...result, optimization: scenarioOptimization }
+            : result,
+        }),
   );
   await context.route(`**/api/v1/lesson-jobs/${jobId}/artifacts`, (route) =>
     route.fulfill({
       json: [
         {
           artifactId: "01J00000000000000000000001",
-          type: "BEST_DOCX",
-          displayName: "best_lesson_plan.docx",
+          type: isFailed ? "ORIGINAL_DOCX" : "BEST_DOCX",
+          displayName: isFailed
+            ? "uploaded_original.docx"
+            : "best_lesson_plan.docx",
           mediaType:
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
           sizeBytes: 46781,
@@ -155,13 +239,27 @@ async function installRoutes(context) {
   );
 }
 
-async function capture(browser, viewport, path, fileName) {
+async function capture(
+  browser,
+  viewport,
+  path,
+  fileName,
+  scenario = "generate",
+) {
   const context = await browser.newContext({ viewport });
-  await installRoutes(context);
+  await installRoutes(context, scenario);
   const page = await context.newPage();
   await page.goto(`http://127.0.0.1:4173${path}`, {
     waitUntil: "networkidle",
   });
+  if (
+    path.startsWith("/jobs/") &&
+    (await page.locator(".radar-slot").count())
+  ) {
+    await page.locator(".radar-slot").scrollIntoViewIfNeeded();
+    await page.locator(".radar-svg").waitFor();
+    await page.evaluate(() => window.scrollTo(0, 0));
+  }
   await page.screenshot({
     path: `${outputDirectory}/${fileName}`,
     fullPage: true,
@@ -217,6 +315,41 @@ try {
     { width: 390, height: 844 },
     "/create/generate",
     "07-generate-mobile.png",
+  );
+  await capture(
+    browser,
+    { width: 1440, height: 1000 },
+    `/jobs/${jobId}`,
+    "08-optimize-result-desktop.png",
+    "optimize",
+  );
+  await capture(
+    browser,
+    { width: 390, height: 844 },
+    `/jobs/${jobId}`,
+    "10-optimize-unchanged-mobile.png",
+    "unchanged",
+  );
+  await capture(
+    browser,
+    { width: 390, height: 844 },
+    `/jobs/${jobId}`,
+    "11-optimize-needs-human-mobile.png",
+    "needs-human",
+  );
+  await capture(
+    browser,
+    { width: 390, height: 844 },
+    `/jobs/${jobId}`,
+    "12-optimize-failed-mobile.png",
+    "failed",
+  );
+  await capture(
+    browser,
+    { width: 390, height: 844 },
+    `/jobs/${jobId}`,
+    "09-optimize-result-mobile.png",
+    "optimize",
   );
 } finally {
   await browser.close();

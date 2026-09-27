@@ -2,9 +2,15 @@ package com.zone.lesoongen.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import java.lang.reflect.RecordComponent;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.Set;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import org.junit.jupiter.api.Test;
 
@@ -44,5 +50,42 @@ class ContractFixtureTest {
         assertEquals("01J00000000000000000000000", request.externalJobId());
         assertEquals(45, request.task().durationMinutes());
         assertEquals("20260911-070000-化学-高二-官能团-000001", accepted.engineRunId());
+    }
+
+    @Test
+    void pythonRequiredEngineFieldsAndStatusesStayReadableByJava() throws Exception {
+        Path contract = Path.of("..", "specs", "002-project-improvement", "contracts", "engine-models.json");
+        JsonNode models = mapper.readTree(Files.readString(contract)).path("models");
+        assertWireFields(models.path("CreateRunRequest"), EngineContracts.CreateRequest.class);
+        assertWireFields(models.path("CreateRunRequest").path("$defs").path("EngineLessonInput"),
+                EngineContracts.LessonInput.class);
+        assertWireFields(models.path("RunAccepted"), EngineContracts.Accepted.class);
+        assertWireFields(models.path("RunSnapshot"), EngineContracts.Snapshot.class);
+        assertWireFields(models.path("RunSnapshot").path("$defs").path("EngineUsage"),
+                EngineContracts.Usage.class);
+        assertWireFields(models.path("EngineEventPage"), EngineContracts.EventPage.class);
+        assertWireFields(models.path("EngineArtifact"), EngineContracts.Artifact.class);
+        assertWireFields(models.path("EngineResult"), EngineContracts.Result.class);
+        JsonNode statusValues = models.path("RunSnapshot").path("$defs")
+                .path("EngineRunStatus").path("enum");
+        Set<String> pythonStatuses = new HashSet<>();
+        statusValues.forEach(value -> pythonStatuses.add(value.asText()));
+        assertEquals(Set.of("queued", "preprocessing", "running", "exporting",
+                "completed", "needs_human", "failed"), pythonStatuses);
+    }
+
+    private static void assertWireFields(JsonNode schema, Class<?> recordType) {
+        assertFalse(schema.isMissingNode(), "Missing Python schema for " + recordType.getSimpleName());
+        Set<String> javaFields = new HashSet<>();
+        for (RecordComponent component : recordType.getRecordComponents()) {
+            JsonProperty property = component.getAnnotation(JsonProperty.class);
+            if (property == null) property = component.getAccessor().getAnnotation(JsonProperty.class);
+            javaFields.add(property == null || property.value().isBlank()
+                    ? component.getName() : property.value());
+        }
+        for (JsonNode field : schema.path("required")) {
+            assertTrue(javaFields.contains(field.asText()), () ->
+                    recordType.getSimpleName() + " cannot read required Python field " + field.asText());
+        }
     }
 }

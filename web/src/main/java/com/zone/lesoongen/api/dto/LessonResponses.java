@@ -59,7 +59,7 @@ public final class LessonResponses {
     public record LessonResult(String jobId, JobStatus status, String stopReason,
             String bestVersionId, String lastVersionId, JsonNode bestLessonPlan,
             Map<String, Double> scores, Double overallScore, String scoreNotice,
-            JsonNode optimization,
+            JsonNode optimization, JsonNode review,
             List<Change> changes, List<String> unresolvedIssues,
             List<String> parseWarnings) {
     }

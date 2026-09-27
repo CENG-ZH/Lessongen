@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { OptimizationSummary } from "../types/api";
+import {
+  formatTeachingContent,
+  lessonPathLabel,
+} from "../utils/lessonPresentation";
 
 const props = defineProps<{ summary: OptimizationSummary }>();
 const gate = computed(() => props.summary.quality_gate);
@@ -76,10 +80,6 @@ function progressLabel(progress?: string): string {
   }
 }
 
-function readable(value: unknown): string {
-  if (typeof value === "string") return value || "（空）";
-  return value == null ? "（空）" : JSON.stringify(value, null, 2);
-}
 function roleLabel(role: string): string {
   if (role.startsWith("subject_critic")) return "学科审查";
   if (role.startsWith("pedagogy_critic")) return "教学法审查";
@@ -120,80 +120,119 @@ function roleLabel(role: string): string {
       保持不变，导入时遗漏的图片文字不属于已优化内容。
     </p>
 
-    <div class="evidence-stats">
-      <div>
-        <strong>{{ summary.critique_count }}</strong
-        ><span>审查意见</span>
-      </div>
-      <div>
-        <strong>{{ summary.validation_batch_count }}</strong
-        ><span>裁决批次</span>
-      </div>
-      <div>
-        <strong>{{ summary.rewrite_count }}</strong
-        ><span>改写轮次</span>
-      </div>
-      <div>
-        <strong>{{ summary.changed_section_count }}</strong
-        ><span>交付稿变化栏目</span>
-      </div>
-    </div>
-
-    <p class="score-context">
-      本次原稿评分 {{ summary.baseline_score?.toFixed(1) ?? "—" }}， 交付稿评分
-      {{ summary.selected_score?.toFixed(1) ?? "—" }}。
-      {{ summary.score_notice }}
-    </p>
-    <section class="quality-evidence" aria-label="优化达标与成对比较">
-      <h3>修改效果的内部证据</h3>
-      <p class="review-conclusion">{{ reviewConclusion }}</p>
-      <div class="evidence-checks">
-        <div>
-          <strong>{{ gateLabel }}</strong>
-          <p v-if="gate">
-            {{ gate.content_changed ? "内容已改变" : "内容未改变" }}； 八维总评
-            {{ gate.absolute_target_met ? "达标" : "未达标" }}；
-            相对原稿提升与维度退步约束
-            {{ gate.relative_target_met ? "达标" : "未达标" }}； 结构规则
-            {{ gate.hard_rules_ok ? "通过" : "未通过" }}。
-          </p>
-          <p v-if="gate">
-            设定值：总评 ≥ {{ gate.thresholds.overall.toFixed(1) }}，相对提升 ≥
-            {{ gate.thresholds.minimum_gain.toFixed(1) }}，任一维度下降 ≤
-            {{ gate.thresholds.maximum_dimension_drop.toFixed(1) }}。
-          </p>
-        </div>
-        <div>
-          <strong>{{ comparisonLabel }}</strong>
-          <p v-if="comparison?.votes?.length === 2 && !comparison.failed_calls">
-            已交换原稿与修改稿展示顺序完成两次对照；聚焦内容进展：{{
-              progressLabel(comparison.target_issue_progress)
-            }}。
-          </p>
-          <p v-else-if="comparison">
-            本次只完成 {{ comparison.votes?.length ?? 0 }} / 2
-            次有效对照，未形成可靠的双顺序判断。
-          </p>
-          <p v-if="comparison">对照说明：{{ comparisonReason }}</p>
-          <p v-else-if="!comparison">
-            当前结果未包含对照记录，可能是历史任务或预算、安全限制；不能据此判断修改稿优于原稿。
-          </p>
-          <p v-if="comparison?.regression_flags.length">
-            疑似退步：{{ comparison.regression_flags.join("；") }}
-          </p>
-          <p v-if="comparison?.evidence.length">
-            对照依据：{{ comparison.evidence.slice(0, 2).join("；") }}
-          </p>
-          <p v-if="comparison?.failed_calls">
-            其中
-            {{ comparison.failed_calls }} 次比较未完成，结论不可用于自动选优。
-          </p>
-        </div>
-      </div>
-      <p class="scope-note">
-        内部分数和模型对照只用于筛选候选稿，不是教学效果证明；最终是否采用修改稿由教师决定。
+    <section
+      id="optimization-diff"
+      class="diff-list primary-diff"
+      aria-label="原稿与交付稿内容对比"
+    >
+      <h3>交付稿相对原稿的实际变化</h3>
+      <p v-if="!summary.changed_sections.length" class="no-diff">
+        没有检测到交付稿的教学内容变化；内部评分差不能算作优化。
       </p>
+      <details
+        v-for="(section, index) in summary.changed_sections"
+        :key="section.field"
+        :open="index === 0"
+      >
+        <summary>{{ section.label }} <small>查看修改前后</small></summary>
+        <div class="diff-columns">
+          <div>
+            <span>修改前 · 导入基线</span>
+            <pre>{{ formatTeachingContent(section.before) }}</pre>
+          </div>
+          <div>
+            <span>修改后 · 交付稿</span>
+            <pre>{{ formatTeachingContent(section.after) }}</pre>
+          </div>
+        </div>
+      </details>
     </section>
+
+    <p class="review-conclusion">{{ reviewConclusion }}</p>
+    <details class="evidence-drawer">
+      <summary>查看内部评分、审查次数与对照依据</summary>
+      <div class="evidence-drawer-body">
+        <div class="evidence-stats">
+          <div>
+            <strong>{{ summary.critique_count }}</strong
+            ><span>审查意见</span>
+          </div>
+          <div>
+            <strong>{{ summary.validation_batch_count }}</strong
+            ><span>裁决批次</span>
+          </div>
+          <div>
+            <strong>{{ summary.rewrite_count }}</strong
+            ><span>改写轮次</span>
+          </div>
+          <div>
+            <strong>{{ summary.changed_section_count }}</strong
+            ><span>交付稿变化栏目</span>
+          </div>
+        </div>
+
+        <p class="score-context">
+          本次原稿评分 {{ summary.baseline_score?.toFixed(1) ?? "—" }}，
+          交付稿评分 {{ summary.selected_score?.toFixed(1) ?? "—" }}。
+          {{ summary.score_notice }}
+        </p>
+        <section class="quality-evidence" aria-label="优化达标与成对比较">
+          <h3>修改效果的内部证据</h3>
+          <div class="evidence-checks">
+            <div>
+              <strong>{{ gateLabel }}</strong>
+              <p v-if="gate">
+                {{ gate.content_changed ? "内容已改变" : "内容未改变" }}；
+                八维总评 {{ gate.absolute_target_met ? "达标" : "未达标" }}；
+                相对原稿提升与维度退步约束
+                {{ gate.relative_target_met ? "达标" : "未达标" }}； 结构规则
+                {{ gate.hard_rules_ok ? "通过" : "未通过" }}。
+              </p>
+              <p v-if="gate">
+                设定值：总评 ≥
+                {{ gate.thresholds.overall.toFixed(1) }}，相对提升 ≥
+                {{ gate.thresholds.minimum_gain.toFixed(1) }}，任一维度下降 ≤
+                {{ gate.thresholds.maximum_dimension_drop.toFixed(1) }}。
+              </p>
+            </div>
+            <div>
+              <strong>{{ comparisonLabel }}</strong>
+              <p
+                v-if="
+                  comparison?.votes?.length === 2 && !comparison.failed_calls
+                "
+              >
+                已交换原稿与修改稿展示顺序完成两次对照；聚焦内容进展：{{
+                  progressLabel(comparison.target_issue_progress)
+                }}。
+              </p>
+              <p v-else-if="comparison">
+                本次只完成 {{ comparison.votes?.length ?? 0 }} / 2
+                次有效对照，未形成可靠的双顺序判断。
+              </p>
+              <p v-if="comparison">对照说明：{{ comparisonReason }}</p>
+              <p v-else-if="!comparison">
+                当前结果未包含对照记录，可能是历史任务或预算、安全限制；不能据此判断修改稿优于原稿。
+              </p>
+              <p v-if="comparison?.regression_flags.length">
+                疑似退步：{{ comparison.regression_flags.join("；") }}
+              </p>
+              <p v-if="comparison?.evidence.length">
+                对照依据：{{ comparison.evidence.slice(0, 2).join("；") }}
+              </p>
+              <p v-if="comparison?.failed_calls">
+                其中
+                {{ comparison.failed_calls }}
+                次比较未完成，结论不可用于自动选优。
+              </p>
+            </div>
+          </div>
+          <p class="scope-note">
+            内部分数和模型对照只用于筛选候选稿，不是教学效果证明；最终是否采用修改稿由教师决定。
+          </p>
+        </section>
+      </div>
+    </details>
     <p v-if="summary.unselected_candidate_version_id" class="candidate-note">
       系统另保存了真实修改候选稿
       {{ summary.unselected_candidate_version_id }} （内部评分
@@ -202,115 +241,106 @@ function roleLabel(role: string): string {
       与原稿对照，须由教师判断是否采用。
     </p>
 
-    <div class="process-track">
-      <h3>实际流程</h3>
-      <ol>
-        <li>
-          上传原稿 <code>{{ summary.baseline_version_id }}</code
-          >，进行内部基线评估
-        </li>
-        <li>
-          {{
-            summary.critique_count
-              ? "三类 Critic 已提出审查意见"
-              : "未完成 Critic 审查"
-          }}
-        </li>
-        <li>
-          {{
-            summary.validation_batch_count
-              ? "Validator 已裁决意见"
-              : "未形成意见裁决"
-          }}
-        </li>
-        <li>
-          {{
-            summary.rewrite_count
-              ? `完成 ${summary.rewrite_count} 轮候选改写`
-              : "未完成实际改写"
-          }}
-        </li>
-        <li>
-          选中交付版本 <code>{{ summary.selected_version_id }}</code>
-        </li>
-      </ol>
-    </div>
-
-    <div v-if="summary.rounds.length" class="rounds">
-      <details
-        v-for="(round, index) in summary.rounds"
-        :key="`${round.input_version_id}-${round.output_version_id}`"
-      >
-        <summary>
-          第 {{ index + 1 }} 轮：{{ round.input_version_id }} →
-          {{ round.output_version_id }} ·
-          {{
-            round.strategy === "targeted_patch"
-              ? "定向补丁"
-              : round.strategy === "full_document"
-                ? "全文修订"
-                : "旧版路径"
-          }}
-          · 接受 {{ round.accepted_count }} / 修改
-          {{ round.implemented_count }} / 未解决 {{ round.unresolved_count }}
-        </summary>
-        <ul v-if="round.changes.length">
-          <li v-for="change in round.changes" :key="change.critique_id">
-            问题 <code>{{ change.target_path }}</code> → 实改
-            <code>{{ change.edited_paths?.join("、") || "旧记录未注明" }}</code
-            >：{{ change.after_summary }}
+    <details class="audit-drawer">
+      <summary>查看审查、裁决与每轮修改记录</summary>
+      <div class="process-track">
+        <h3>实际流程</h3>
+        <ol>
+          <li>
+            上传原稿 <code>{{ summary.baseline_version_id }}</code
+            >，进行内部基线评估
           </li>
-        </ul>
-        <ul v-if="round.unresolved_reasons && round.unresolved_count">
-          <li
-            v-for="(reason, critiqueId) in round.unresolved_reasons"
-            :key="critiqueId"
-          >
-            未解决 <code>{{ critiqueId }}</code
-            >：{{ reason }}
+          <li>
+            {{
+              summary.critique_count
+                ? "三类 Critic 已提出审查意见"
+                : "未完成 Critic 审查"
+            }}
           </li>
-        </ul>
-      </details>
-    </div>
+          <li>
+            {{
+              summary.validation_batch_count
+                ? "Validator 已裁决意见"
+                : "未形成意见裁决"
+            }}
+          </li>
+          <li>
+            {{
+              summary.rewrite_count
+                ? `完成 ${summary.rewrite_count} 轮候选改写`
+                : "未完成实际改写"
+            }}
+          </li>
+          <li>
+            选中交付版本 <code>{{ summary.selected_version_id }}</code>
+          </li>
+        </ol>
+      </div>
 
-    <div v-if="summary.reviewed_issues.length" class="review-list">
-      <h3>审查意见与裁决</h3>
-      <details v-for="item in summary.reviewed_issues" :key="item.critique_id">
-        <summary>
-          {{ roleLabel(item.role) }} · {{ item.target_path }}
-          <small>{{ item.status }}</small>
-        </summary>
-        <p><strong>发现：</strong>{{ item.issue }}</p>
-        <p><strong>建议：</strong>{{ item.suggestion }}</p>
-        <p>
-          <strong>裁决：</strong>{{ item.decision || "未裁决" }}。{{
-            item.decision_reason || ""
-          }}
-        </p>
-      </details>
-    </div>
+      <div v-if="summary.rounds.length" class="rounds">
+        <details
+          v-for="(round, index) in summary.rounds"
+          :key="`${round.input_version_id}-${round.output_version_id}`"
+        >
+          <summary>
+            第 {{ index + 1 }} 轮：{{ round.input_version_id }} →
+            {{ round.output_version_id }} ·
+            {{
+              round.strategy === "targeted_patch"
+                ? "定向补丁"
+                : round.strategy === "full_document"
+                  ? "全文修订"
+                  : "旧版路径"
+            }}
+            · 接受 {{ round.accepted_count }} / 修改
+            {{ round.implemented_count }} / 未解决 {{ round.unresolved_count }}
+          </summary>
+          <ul v-if="round.changes.length">
+            <li v-for="change in round.changes" :key="change.critique_id">
+              {{ lessonPathLabel(change.target_path) }}：{{
+                change.after_summary
+              }}
+              <small
+                >技术路径：{{ change.target_path }} →
+                {{ change.edited_paths?.join("、") || "旧记录未注明" }}</small
+              >
+            </li>
+          </ul>
+          <ul v-if="round.unresolved_reasons && round.unresolved_count">
+            <li
+              v-for="(reason, critiqueId) in round.unresolved_reasons"
+              :key="critiqueId"
+            >
+              未解决 <code>{{ critiqueId }}</code
+              >：{{ reason }}
+            </li>
+          </ul>
+        </details>
+      </div>
 
-    <div class="diff-list">
-      <h3>最终交付稿相对原稿的内容对比</h3>
-      <p v-if="!summary.changed_sections.length" class="no-diff">
-        没有检测到实际内容变化。下载的 Word 与原稿在教学内容上相同。
-      </p>
-      <details v-for="section in summary.changed_sections" :key="section.field">
-        <summary>
-          {{ section.label }} <small>{{ section.field }}</small>
-        </summary>
-        <div class="diff-columns">
-          <div>
-            <span>修改前 · 原稿</span>
-            <pre>{{ readable(section.before) }}</pre>
-          </div>
-          <div>
-            <span>修改后 · 交付稿</span>
-            <pre>{{ readable(section.after) }}</pre>
-          </div>
-        </div>
-      </details>
-    </div>
+      <div v-if="summary.reviewed_issues.length" class="review-list">
+        <h3>审查意见与裁决</h3>
+        <details
+          v-for="item in summary.reviewed_issues"
+          :key="item.critique_id"
+        >
+          <summary>
+            {{ roleLabel(item.role) }} · {{ lessonPathLabel(item.target_path) }}
+            <small>{{ item.status }}</small>
+          </summary>
+          <p><strong>发现：</strong>{{ item.issue }}</p>
+          <p><strong>建议：</strong>{{ item.suggestion }}</p>
+          <p>
+            <strong>技术位置：</strong><code>{{ item.target_path }}</code>
+          </p>
+          <p>
+            <strong>裁决：</strong>{{ item.decision || "未裁决" }}。{{
+              item.decision_reason || ""
+            }}
+          </p>
+        </details>
+      </div>
+    </details>
     <div
       v-if="summary.unselected_candidate_changed_sections?.length"
       class="diff-list"
@@ -326,11 +356,11 @@ function roleLabel(role: string): string {
         <div class="diff-columns">
           <div>
             <span>原稿</span>
-            <pre>{{ readable(section.before) }}</pre>
+            <pre>{{ formatTeachingContent(section.before) }}</pre>
           </div>
           <div>
             <span>修改候选稿</span>
-            <pre>{{ readable(section.after) }}</pre>
+            <pre>{{ formatTeachingContent(section.after) }}</pre>
           </div>
         </div>
       </details>
@@ -403,6 +433,29 @@ h3 {
   font-size: 13px;
   line-height: 1.7;
 }
+.primary-diff {
+  margin-top: 20px;
+  padding-top: 0;
+  border-top: 0;
+}
+.primary-diff details[open] {
+  border-color: #b8d5ce;
+  background: #fbfefc;
+}
+.audit-drawer {
+  margin-top: 20px;
+  background: #f9faf8;
+}
+.audit-drawer > summary {
+  color: #245c57;
+}
+.audit-drawer .process-track {
+  margin-top: 14px;
+}
+.rounds li small {
+  display: block;
+  color: #6a7b7d;
+}
 .quality-evidence {
   margin-top: 18px;
   padding: 18px;
@@ -414,10 +467,13 @@ h3 {
   margin-bottom: 8px;
 }
 .review-conclusion {
-  margin: 0 0 14px;
+  margin: 18px 0 0;
   line-height: 1.7;
   color: #194d49;
   font-weight: 600;
+}
+.evidence-drawer-body {
+  padding: 0 17px 17px;
 }
 .evidence-checks {
   display: grid;
@@ -441,7 +497,7 @@ h3 {
 }
 .scope-note {
   margin: 13px 0 0;
-  color: #667a7b;
+  color: #536872;
   line-height: 1.6;
   font-size: 12px;
 }
@@ -485,7 +541,7 @@ summary {
   line-height: 1.5;
 }
 summary small {
-  color: #75868b;
+  color: #536872;
   font-weight: 400;
   margin-left: 8px;
 }

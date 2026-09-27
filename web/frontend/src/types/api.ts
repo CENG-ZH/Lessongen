@@ -114,6 +114,13 @@ export interface LessonResult {
   overallScore?: number | null;
   scoreNotice: string;
   optimization?: OptimizationSummary | null;
+  review?: {
+    policy: string;
+    reviewed_roles: string[];
+    validator_completed: boolean;
+    independent_review_complete: boolean;
+    content_changed: boolean;
+  } | null;
   changes: Array<{
     summary: string;
     targetPath: string;

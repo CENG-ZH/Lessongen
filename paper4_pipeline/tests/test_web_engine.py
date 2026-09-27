@@ -50,6 +50,7 @@ from paper4_pipeline.domain.models import (  # noqa: E402
     StopReason,
     TaskMode,
     TokenUsage,
+    ValidationBatch,
 )
 from paper4_pipeline.providers.openai_compatible import (  # noqa: E402
     ProviderCallResult,
@@ -819,6 +820,61 @@ class EngineApiContractTests(unittest.TestCase):
         listed = EngineProjection(settings).artifacts(run_id)
 
         self.assertEqual([], [item.artifact_id for item in listed])
+
+    def test_review_summary_requires_all_critics_and_validator_in_same_round(self) -> None:
+        settings = make_settings(self.root)
+        registry = RunRegistry(settings)
+        run_id = "review-summary-run"
+        task = make_task()
+        registry.create(RunRecord(
+            engine_run_id=run_id, external_job_id=JOB_ID,
+            request_sha256=REQUEST_HASH, mode=EngineMode.GENERATE,
+            task_id=task.task_id, subject=task.subject, grade=task.grade,
+            topic=task.topic, status=EngineRunStatus.COMPLETED,
+        ))
+        result = PipelineResult(
+            run_id=run_id, task_id=task.task_id, task_mode=TaskMode.GENERATE,
+            experiment_id="unit", method_id="unit", status=RunStatus.COMPLETED,
+            stop_reason=StopReason.NO_ACTIONABLE_FEEDBACK,
+            best_version_id="v0", last_version_id="v0",
+            versions=[make_version("v0", 0, score=8.0, task=task)],
+            validation_batches=[ValidationBatch(
+                batch_id="validated-1", critique_batch_id="critics-1",
+                round_index=1,
+            )],
+        )
+        directory = settings.artifacts_root / run_id
+        directory.mkdir(parents=True)
+        (directory / "run_result.json").write_text(
+            result.model_dump_json(), encoding="utf-8"
+        )
+        rows = [{
+            "event_type": "run_started",
+            "input_summary": {"experiment_config": {
+                "generation_review_policy": "at_least_one_independent_review",
+                "critic_profile_ids": ["subject", "pedagogy", "alignment"],
+            }},
+        }]
+        rows.extend({
+            "event_type": "critic_completed", "actor_profile_id": role,
+            "round_index": round_index,
+        } for role, round_index in (
+            ("subject", 1), ("pedagogy", 1), ("alignment", 2),
+        ))
+        trace = directory / "trace.jsonl"
+        trace.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+
+        projection = EngineProjection(settings)
+        incomplete = projection.result(run_id).review
+        self.assertTrue(incomplete.validator_completed)
+        self.assertFalse(incomplete.independent_review_complete)
+        self.assertFalse(incomplete.content_changed)
+
+        rows[-1]["round_index"] = 1
+        trace.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+        complete = projection.result(run_id).review
+        self.assertTrue(complete.independent_review_complete)
+        self.assertEqual("at_least_one_independent_review", complete.policy)
 
     def test_download_unknown_or_missing_artifact_returns_problem_404(self) -> None:
         settings = make_settings(self.root)

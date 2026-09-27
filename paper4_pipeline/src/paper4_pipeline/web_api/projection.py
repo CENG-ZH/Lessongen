@@ -18,6 +18,7 @@ from paper4_pipeline.web_api.schemas import (
     EngineUsage,
     ImplementedChangeSummary,
     PublicEngineEvent,
+    ReviewSummary,
     RunSnapshot,
 )
 from paper4_pipeline.web_api.settings import EngineSettings
@@ -135,6 +136,39 @@ class EngineProjection:
             if item.status
             not in {CritiqueStatus.IMPLEMENTED, CritiqueStatus.VERIFIED_FIXED}
         ]
+        trace = self._trace_rows(engine_run_id)
+        reviewed_roles = list(dict.fromkeys(
+            str(row.get("actor_profile_id"))
+            for row in trace
+            if row.get("event_type") == "critic_completed"
+            and row.get("actor_profile_id")
+        ))
+        run_start = next((row for row in trace if row.get("event_type") == "run_started"), {})
+        start_summary = run_start.get("input_summary") or {}
+        run_config = start_summary.get("experiment_config") or {}
+        policy = run_config.get("generation_review_policy", "legacy_unknown")
+        expected_roles = set(run_config.get("critic_profile_ids") or [
+            "subject_critic_v0_1", "pedagogy_critic_v0_1", "alignment_critic_v0_1",
+        ])
+        reviews_by_round: dict[int, set[str]] = {}
+        for row in trace:
+            if row.get("event_type") == "critic_completed" and row.get("actor_profile_id"):
+                round_index = int(row.get("round_index") or 0)
+                reviews_by_round.setdefault(round_index, set()).add(
+                    str(row["actor_profile_id"])
+                )
+        independently_reviewed = any(
+            expected_roles.issubset(reviews_by_round.get(batch.round_index, set()))
+            for batch in result.validation_batches
+        )
+        initial_version = min(result.versions, key=lambda item: (item.iteration, item.version_id))
+        review = ReviewSummary(
+            policy=policy,
+            reviewed_roles=reviewed_roles,
+            validator_completed=bool(result.validation_batches),
+            independent_review_complete=independently_reviewed,
+            content_changed=(initial_version.document_hash != best.document_hash),
+        )
         return EngineResult(
             engine_run_id=engine_run_id,
             external_job_id=record.external_job_id,
@@ -146,6 +180,7 @@ class EngineProjection:
             rubric_scores=evaluation.rubric_scores if evaluation else None,
             overall_score=evaluation.overall_score if evaluation else None,
             optimization=(optimization_summary(result) if record.mode.value == "optimize" else None),
+            review=review,
             implemented_changes=changes,
             unresolved_issues=unresolved,
             parse_warnings=record.parse_warnings,
@@ -307,7 +342,30 @@ class EngineProjection:
         input_tokens = record.preprocessing_input_tokens
         output_tokens = record.preprocessing_output_tokens
         estimated_cost = record.preprocessing_estimated_cost
+        ledger_path = self._artifact_dir(engine_run_id) / "model_call_ledger.jsonl"
+        if ledger_path.is_file():
+            for line in ledger_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                attempt = json.loads(line)
+                model_calls += 1
+                input_tokens += int(attempt.get("input_tokens") or 0)
+                output_tokens += int(attempt.get("output_tokens") or 0)
+                estimated_cost += float(attempt.get("estimated_cost") or 0)
+            return EngineUsage(
+                model_call_count=model_calls,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                estimated_cost=estimated_cost,
+            )
+        countable = {
+            "design_blueprint_completed", "writer_completed", "judge_completed",
+            "critic_completed", "critic_failed", "validation_completed",
+            "rewrite_completed", "rewrite_aborted", "optimization_pairwise_compared",
+        }
         for row in rows:
+            if row.get("event_type") not in countable:
+                continue
             usage = row.get("token_usage") or {}
             if isinstance(usage, dict):
                 current_input = int(usage.get("input_tokens") or 0)

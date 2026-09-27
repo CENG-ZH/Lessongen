@@ -3,7 +3,17 @@ import DashboardView from "./views/DashboardView.vue";
 
 export default createRouter({
   history: createWebHistory(),
-  scrollBehavior: () => ({ top: 0 }),
+  scrollBehavior: (to, _from, savedPosition) => {
+    if (to.hash)
+      return {
+        el: to.hash,
+        top: 100,
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
+      };
+    return savedPosition || { top: 0 };
+  },
   routes: [
     { path: "/", name: "dashboard", component: DashboardView },
     {

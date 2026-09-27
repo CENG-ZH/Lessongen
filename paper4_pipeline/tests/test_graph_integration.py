@@ -293,7 +293,10 @@ class GraphIntegrationTests(unittest.TestCase):
 
     def test_model_call_budget_reserves_configured_retries(self):
         task = make_task()
-        config = make_config(max_rounds=2, max_model_calls=20)
+        config = make_config(
+            max_rounds=2, max_model_calls=20,
+            generation_review_policy="judge_first_fast_path",
+        )
         rewriter = _Rewriter()
 
         with tempfile.TemporaryDirectory() as directory:
@@ -307,6 +310,106 @@ class GraphIntegrationTests(unittest.TestCase):
         self.assertEqual(3, result.model_call_count)
         self.assertEqual(StopReason.BUDGET_EXCEEDED, result.stop_reason)
         self.assertEqual([], rewriter.accepted_ids_by_round)
+
+    def test_high_scoring_generated_v0_gets_independent_review_without_fake_rewrite(self):
+        task = make_task()
+        config = make_config(max_rounds=0, max_model_calls=20)
+        base = _suite(config, _Rewriter())
+        suite = AgentSuite(
+            execution_mode=base.execution_mode, profiles=base.profiles,
+            designer=base.designer, writer=base.writer,
+            critics=[_Critic(item.profile_id, []) for item in base.critics],
+            validator=base.validator, judge=_PassingJudge(),
+            rewriter=base.rewriter,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = Paper4Workflow(suite, Path(directory)).run(
+                task, config, run_id="high-v0-independent-review"
+            )
+            events = [
+                json.loads(line) for line in Path(result.trace_path).read_text(
+                    encoding="utf-8"
+                ).splitlines()
+            ]
+        self.assertEqual(RunStatus.COMPLETED, result.status)
+        self.assertEqual(StopReason.NO_ACTIONABLE_FEEDBACK, result.stop_reason)
+        self.assertEqual(1, len(result.versions))
+        self.assertEqual(1, len(result.validation_batches))
+        self.assertEqual(3, len([item for item in events if item["event_type"] == "critic_completed"]))
+        self.assertFalse(result.rewrite_records)
+        event_types = [item["event_type"] for item in events]
+        fixture = json.loads(
+            (Path(__file__).parent / "fixtures" / "p1_high_score_v0_review.json")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(fixture["event_types"], event_types)
+        self.assertEqual(fixture["result"], {
+            "status": result.status.value,
+            "stop_reason": result.stop_reason.value,
+            "best_version_id": result.best_version_id,
+            "version_count": len(result.versions),
+            "validation_batch_count": len(result.validation_batches),
+        })
+        self.assertLess(event_types.index("writer_completed"), event_types.index("judge_completed"))
+        self.assertLess(event_types.index("judge_completed"), event_types.index("critic_completed"))
+        self.assertLess(event_types.index("critic_completed"), event_types.index("validation_completed"))
+        self.assertLess(event_types.index("validation_completed"), event_types.index("run_completed"))
+        self.assertNotIn("rewrite_completed", event_types)
+
+    def test_reviewed_feedback_with_zero_rewrite_rounds_requires_human(self):
+        task = make_task()
+        config = make_config(max_rounds=0, max_model_calls=20)
+        base = _suite(config, _Rewriter())
+        suite = AgentSuite(
+            execution_mode=base.execution_mode, profiles=base.profiles,
+            designer=base.designer, writer=base.writer, critics=base.critics,
+            validator=base.validator, judge=_PassingJudge(),
+            rewriter=base.rewriter,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = Paper4Workflow(suite, Path(directory)).run(
+                task, config, run_id="reviewed-no-rewrite-budget"
+            )
+        self.assertEqual(RunStatus.NEEDS_HUMAN, result.status)
+        self.assertEqual(StopReason.MAX_ROUNDS, result.stop_reason)
+        self.assertEqual(1, len(result.versions))
+        self.assertEqual(1, len(result.validation_batches))
+        self.assertFalse(result.rewrite_records)
+
+    def test_review_budget_shortfall_keeps_v0_for_human_review(self):
+        task = make_task()
+        config = make_config(max_model_calls=14)
+        base = _suite(config, _Rewriter())
+        suite = AgentSuite(
+            execution_mode=base.execution_mode, profiles=base.profiles,
+            designer=base.designer, writer=base.writer, critics=base.critics,
+            validator=base.validator, judge=_PassingJudge(), rewriter=base.rewriter,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = Paper4Workflow(suite, Path(directory)).run(
+                task, config, run_id="review-budget-shortfall"
+            )
+        self.assertEqual(RunStatus.NEEDS_HUMAN, result.status)
+        self.assertEqual(StopReason.BUDGET_EXCEEDED, result.stop_reason)
+        self.assertEqual(1, len(result.versions))
+        self.assertFalse(result.validation_batches)
+
+    def test_fast_path_is_explicit_and_does_not_claim_review(self):
+        task = make_task()
+        config = make_config(generation_review_policy="judge_first_fast_path")
+        base = _suite(config, _Rewriter())
+        suite = AgentSuite(
+            execution_mode=base.execution_mode, profiles=base.profiles,
+            designer=base.designer, writer=base.writer, critics=base.critics,
+            validator=base.validator, judge=_PassingJudge(), rewriter=base.rewriter,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = Paper4Workflow(suite, Path(directory)).run(
+                task, config, run_id="explicit-fast-path"
+            )
+        self.assertEqual(StopReason.QUALITY_PASSED, result.stop_reason)
+        self.assertFalse(result.validation_batches)
+        self.assertFalse(result.critiques)
 
     def test_too_small_bootstrap_attempt_budget_fails_before_any_artifact(self):
         task = make_task()

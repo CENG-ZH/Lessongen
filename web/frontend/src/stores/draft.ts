@@ -37,20 +37,34 @@ export const useDraftStore = defineStore("draft", {
   }),
   actions: {
     persistGenerate() {
-      sessionStorage.setItem(
-        "lesoongen.generate-draft",
-        JSON.stringify(this.generate),
-      );
+      try {
+        sessionStorage.setItem(
+          "lesoongen.generate-draft",
+          JSON.stringify(this.generate),
+        );
+        return true;
+      } catch {
+        return false;
+      }
     },
     persistOptimize() {
-      sessionStorage.setItem(
-        "lesoongen.optimize-draft",
-        JSON.stringify(this.optimize),
-      );
+      try {
+        sessionStorage.setItem(
+          "lesoongen.optimize-draft",
+          JSON.stringify(this.optimize),
+        );
+        return true;
+      } catch {
+        return false;
+      }
     },
     clearGenerate() {
       this.generate = base();
-      sessionStorage.removeItem("lesoongen.generate-draft");
+      try {
+        sessionStorage.removeItem("lesoongen.generate-draft");
+      } catch {
+        // The in-memory draft is still cleared when storage is unavailable.
+      }
     },
     clearOptimize() {
       this.optimize = {
@@ -58,7 +72,11 @@ export const useDraftStore = defineStore("draft", {
         optimizationFocus: [],
         mustPreserveContent: [],
       };
-      sessionStorage.removeItem("lesoongen.optimize-draft");
+      try {
+        sessionStorage.removeItem("lesoongen.optimize-draft");
+      } catch {
+        // The in-memory draft is still cleared when storage is unavailable.
+      }
     },
   },
 });

@@ -27,6 +27,7 @@ jobs:
       - name: Verify repository import and run offline tests
         run: |
           uv run --no-sync python -c "import paper4_pipeline; assert '/paper4_pipeline/src/' in paper4_pipeline.__file__"
+          uv run --no-sync python scripts/export_engine_contract.py --check
           uv run --no-sync python -m pytest -q --junitxml=pytest-results.xml
       - name: Save Python test report
         if: always()
