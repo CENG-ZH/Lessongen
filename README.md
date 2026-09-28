@@ -84,14 +84,11 @@ LangGraph / PipelineService
 - Vue 3、TypeScript、Vite、Pinia、Element Plus、ECharts；
 - pytest、JUnit、Testcontainers、Vitest、Playwright。
 
-## 快速启动
-
-唯一推荐运行目录是当前 Git 仓库根目录；在你的机器上是 `F:\comalesson\Lessongen`。`C:\Users\Administrator\Desktop\PR` 只是旧副本，不再作为启动入口。请先停止旧 C 盘服务，避免 5173/8080 端口被旧进程占用；不要删除旧数据。
-
+### 启动指南
 ### 一键启动完整 Web（推荐）
 
 ```bat
-cd /d F:\comalesson\Lessongen
+cd /d .\comalesson\Lessongen
 scripts\up.cmd
 ```
 
@@ -101,10 +98,10 @@ Python 与 Java 共享 `.env` 中的 `LESSONGEN_RUNTIME_ROOT`。本机若已存�
 
 ### 不使用 Docker 的 Python 开发
 
-不再要求 `conda PR4`。只需安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)；仓库 `.python-version` 固定 Python 3.11，uv 在本机没有该版本时会自动下载。然后在仓库根目录执行：
+只需安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)；仓库 `.python-version` 固定 Python 3.11，uv 在本机没有该版本时会自动下载。然后在仓库根目录执行：
 
 ```bat
-cd /d F:\comalesson\Lessongen
+cd /d .\comalesson\Lessongen
 uv sync --project paper4_pipeline --locked --extra web --extra dev
 web\scripts\start-web-engine.cmd --check
 web\scripts\start-web-engine.cmd
