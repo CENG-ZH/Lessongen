@@ -2,7 +2,7 @@
 
 面向教师与学生的多智能体教案生成、审查与 Word 优化系统。Python/LangGraph 负责真实模型闭环，Spring Boot 负责任务、数据库与文件管理，Vue 负责生成、优化、过程展示和结果下载。
 
-> 当前状态：研究原型 / 本地部署 MVP。系统不使用 Mock 教案冒充成功；内部 Judge 分数只用于管线路由，不能替代教师评价或论文实验结论。
+> 当前状态：研究原型 / 本地部署 MVP。
 
 ![Lessongen 首页](web/docs/ui-audit/01-dashboard-desktop.png)
 
